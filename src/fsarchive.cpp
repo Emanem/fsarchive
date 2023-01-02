@@ -29,13 +29,13 @@
 #include <unordered_map>
 #include <set>
 #include <vector>
+#include <sstream>
 #include <string.h>
 
 extern "C" {
 #include "bsdiff.h"
+#include "bspatch.h"
 }
-
-#include <iostream>
 
 namespace {
 	const char						*FS_ARCHIVE_BASE = "fsarchive_";
@@ -67,6 +67,30 @@ namespace {
 	typedef std::set<std::string>				filelist_t;
 
 	typedef std::vector<uint8_t>				buffer_t;
+
+	typedef struct bspatch_stream				bspatch_stream_t;
+
+	typedef struct bsdiff_stream				bsdiff_stream_t;
+
+	struct bspatch_s {
+		size_t		idx;
+		const buffer_t&	data;
+
+		bspatch_s(const buffer_t& d) : idx(0), data(d) {
+		}
+	};
+
+	extern "C" {
+		int fsarc_bspatch_read(const struct bspatch_stream* stream, void* buffer, int length) {
+			bspatch_s*	bs_s = (bspatch_s*)stream->opaque;
+			if((bs_s->idx + length) <= bs_s->data.size()) {
+				memcpy(buffer, bs_s->data.data() + bs_s->idx, length);
+				bs_s->idx += length;
+				return 0;
+			}
+			return -1;
+		}
+	}
 
 	// utility to combine paths and cater for final /
 	// both need to be longer than 0
@@ -101,7 +125,7 @@ namespace {
 		}
 	}
 
-	fsarc_stat64_t from_stat64(const struct stat64& s, const char* prev = 0, const uint32_t type = FS_TYPE_FILE_NEW) {
+	fsarc_stat64_t fsarc_stat64_from_stat64(const struct stat64& s, const char* prev = 0, const uint32_t type = FS_TYPE_FILE_NEW) {
 		fsarc_stat64_t	fs_t = {0};
 		fs_t.fs_mode = s.st_mode;
 		fs_t.fs_uid = s.st_uid;
@@ -170,7 +194,7 @@ namespace {
 			struct stat64 s = {0};
 			if(lstat64(f.c_str(), &s))
 				throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << f;
-			const auto fs_t = from_stat64(s, 0, FS_TYPE_FILE_NEW);
+			const auto fs_t = fsarc_stat64_from_stat64(s, 0, FS_TYPE_FILE_NEW);
 			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
 			f_map_[f] = fs_t;
@@ -238,12 +262,32 @@ namespace {
 			throw fsarchive::rt_error("Can't extract file ") << f << " from archive (file not present)";
 		// then see if the file is full or not or unchanged
 		if(FS_TYPE_FILE_NEW == s.fs_type) {
+			// if the file is new, nothing to do
 			return;
 		} else if(FS_TYPE_FILE_UNC == s.fs_type) {
+			// if ile is unchanged, fetch it from the correct
+			// prev entry
 			const zip_f	p_fs(combine_paths(settings::AR_DIR, s.fs_prev));
 			r_rebuild_file(p_fs, f, data);
 			return;
 		} else if(FS_TYPE_FILE_MOD == s.fs_type) {
+			// if the file is modified, we first need to
+			// - get the original
+			buffer_t	p_data;
+			const zip_f	p_fs(combine_paths(settings::AR_DIR, s.fs_prev));
+			r_rebuild_file(p_fs, f, p_data);
+			// - apply current patch
+			// s will contain the full size of the patched file
+			buffer_t	n_data(s.fs_size);
+			bspatch_s	bs_s(data);
+			bspatch_stream_t bsp_s = {
+				.opaque = (void*)&bs_s,
+				.read = fsarc_bspatch_read,
+			};
+			// finally patch it
+			if(bspatch(p_data.data(), p_data.size(), n_data.data(), n_data.size(), &bsp_s))
+				throw fsarchive::rt_error("Couldn't patch file ") << f << " from archive";
+			data.swap(n_data);
 			return;
 		}
 		throw fsarchive::rt_error("Invalid metadata fs_type ") << s.fs_type;
@@ -277,7 +321,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				struct stat64 st = {0};
 				if(lstat64(s.c_str(), &st))
 					throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << s;
-				all_files[s] = from_stat64(st);
+				all_files[s] = fsarc_stat64_from_stat64(st);
 			};
 			for(int i=0; i < n; ++i)
 				r_file_find(in_dirs[i], fn_fileadd);
