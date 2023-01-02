@@ -27,14 +27,13 @@
 #include <dirent.h>
 #include <memory>
 #include <unordered_map>
-#include <unordered_set>
+#include <set>
 #include <string.h>
 
 #include <iostream>
 
 namespace {
-	const char						*FS_ARCHIVE_MAIN = "fsarchive_main.zip",
-	      							*FS_ARCHIVE_DELTA = "fsarchive_delta_";
+	const char						*FS_ARCHIVE_BASE = "fsarchive_";
 	
 	const zip_uint16_t					FS_ZIP_EXTRA_FIELD_ID = 0xe0e0;
 	
@@ -58,6 +57,8 @@ namespace {
 
 	typedef std::unordered_map<std::string, fsarc_stat64_t>	fileset_t;
 
+	typedef std::set<std::string>				filelist_t;
+
 	// utility to combine paths and cater for final /
 	// both need to be longer than 0
 	std::string combine_paths(const std::string& a, const std::string& b) {
@@ -68,20 +69,27 @@ namespace {
 
 	// check that a path is a valid directory
 	// and reports if contains fsarchive_main or not
-	bool check_dir_fsarchive_main(const std::string& p, std::string& ar_main_path, std::string& ar_delta_path) {
+	void check_dir_fsarchives(const std::string& p, std::string& ar_next_path, filelist_t& ar_files) {
 		struct stat64 s = {0};
 		if(lstat64(p.c_str(), &s))
 			throw fsarchive::rt_error("Invalid/unable to lstat64 directory: ") << p;
 		if(!S_ISDIR(s.st_mode))
 			throw fsarchive::rt_error("Not a directory: ") << p;
-		// set main file path
-		ar_main_path = combine_paths(p, FS_ARCHIVE_MAIN);
-		ar_delta_path = combine_paths(p, FS_ARCHIVE_DELTA) + std::to_string(time(0)) + ".zip";
-		// check for the main file
-		if(lstat64(ar_main_path.c_str(), &s) ||
-			!S_ISREG(s.st_mode))
-			return false;
-		return true;
+		// set next file path
+		ar_next_path = combine_paths(p, FS_ARCHIVE_BASE) + std::to_string(time(0)) + ".zip";
+		// then open current directory and scen for fsarchive zip files
+		ar_files.clear();
+		std::unique_ptr<DIR, void (*)(DIR*)> p_dir(opendir(p.c_str()), [](DIR *d){ if(d) closedir(d);});
+		struct dirent64	*de = 0;
+		while((de = readdir64(p_dir.get()))) {
+			if(std::string(".") == de->d_name ||
+			   std::string("..") == de->d_name)
+				continue;
+			if(DT_REG == de->d_type) {
+				if(strstr(de->d_name, FS_ARCHIVE_BASE) == de->d_name)
+					ar_files.insert(de->d_name);
+			}
+		}
 	}
 
 	fsarc_stat64_t from_stat64(const struct stat64& s, const char* prev = 0, const uint32_t type = FS_TYPE_FILE_NEW) {
@@ -152,7 +160,7 @@ namespace {
 			struct stat64 s = {0};
 			if(lstat64(f, &s))
 				throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << f;
-			const auto fs_t = from_stat64(s, prev);
+			const auto fs_t = from_stat64(s, prev, FS_TYPE_FILE_NEW);
 			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
 			f_map_[f] = fs_t;
@@ -198,30 +206,27 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	using namespace fsarchive;
 
 	// let's check that we have a valid directory
-	std::string	ar_main_path,
-			ar_delta_path;
-	const bool 	has_main = check_dir_fsarchive_main(settings::AR_DIR, ar_main_path, ar_delta_path);
-	// no matter what generate or open a FS_ARCHIVE_MAIN
-	// file
-	zip_f		z(ar_main_path.c_str());
-	fileset_t	existing_files;
-	for(int i=0; i < n; ++i)
-		r_archive_dir(in_dirs[i], z, existing_files);
-	if(!has_main) {
-		// it means we have generated a new file
-		for(const auto& kv : existing_files)
-			std::cout << "Warning: file " << kv.first << " was listed twice";
-		return;
+	std::string	ar_next_path;
+	filelist_t	ar_files;
+	check_dir_fsarchives(settings::AR_DIR, ar_next_path, ar_files);
+	// if we don't have any files, then write from scratch
+	if(ar_files.empty()) {
+		zip_f		z(ar_next_path.c_str());
+		fileset_t	existing_files;
+		for(int i=0; i < n; ++i)
+			r_archive_dir(in_dirs[i], z, existing_files);
 	} else {
+		// otherwise load the latest archive
+		zip_f		z_latest(ar_files.rbegin()->c_str());
 		// we need to generate a new 'delta' archive
-		zip_f		z_delta(ar_delta_path.c_str());
-		for(const auto& f : existing_files) {
+		zip_f		z_next(ar_next_path.c_str());
+		/*for(const auto& f : existing_files) {
 			const auto& zs = z.get_stat_file(f.first.c_str());
 			if(f.second.fs_mtime > zs.fs_mtime || f.second.fs_size != zs.fs_size) {
 				std::cout << "File " << f.first << " has changed: " << f.second.fs_mtime << "\t" << zs.fs_mtime << std::endl;
 				if(!z_delta.add_file(f.first.c_str()))
 					throw fsarchive::rt_error("Can't add file ") << f.first << " to delta archive " << ar_delta_path;
 			}
-		}
+		}*/
 	}
 }
