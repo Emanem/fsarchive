@@ -118,7 +118,7 @@ namespace {
 		zip_f(const zip_f&);
 		zip_f& operator=(const zip_f&);
 	public:
-		zip_f(const char* fname) : z_(zip_open(fname, ZIP_CREATE, 0)) {
+		zip_f(const std::string& fname) : z_(zip_open(fname.c_str(), ZIP_CREATE, 0)) {
 			if(!z_)
 				throw fsarchive::rt_error("Can't open/create zip archive ") << fname;
 			// populate the entries
@@ -140,27 +140,27 @@ namespace {
 			}
 		}
 
-		bool add_file(const char* f, const char* prev = 0) {
+		bool add_file(const std::string& f) {
 			// if the file is already added to the archive
 			// skip it
 			if(f_map_.find(f) != f_map_.end())
 				return false;
 			std::unique_ptr<zip_source_t, void (*)(zip_source_t*)>	p_zf(
-				zip_source_file_create(f, 0, -1, 0),
+				zip_source_file_create(f.c_str(), 0, -1, 0),
 				[](zip_source_t* p) { if(p) zip_source_close(p); }
 			);
 			if(!p_zf)
 				throw fsarchive::rt_error("Can't open source file for zip ") << f;
-			const zip_int64_t idx = zip_file_add(z_, f, p_zf.get(), ZIP_FL_ENC_GUESS);
+			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf.get(), ZIP_FL_ENC_GUESS);
 			if(-1 == idx)
 				throw fsarchive::rt_error("Can't add file ") << f << " to the archive";
 			// https://libzip.org/documentation/zip_file_extra_field_set.html
 			// we can't use the info libzip stamps because the mtime is off
 			// by one usecond, plus we need to store additional metadata
 			struct stat64 s = {0};
-			if(lstat64(f, &s))
+			if(lstat64(f.c_str(), &s))
 				throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << f;
-			const auto fs_t = from_stat64(s, prev, FS_TYPE_FILE_NEW);
+			const auto fs_t = from_stat64(s, 0, FS_TYPE_FILE_NEW);
 			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
 			f_map_[f] = fs_t;
@@ -179,14 +179,14 @@ namespace {
 		}
 	};
 
-	void r_archive_dir(const std::string& f, zip_f& z, fileset_t& existing_files) {
+	template<typename fn_on_file>
+	void r_file_find(const std::string& f, fn_on_file&& on_file) {
 		struct stat64 s = {0};
 		if(lstat64(f.c_str(), &s))
 			throw fsarchive::rt_error("Invalid/unable to lstat64 file/directory: ") << f;
 		if(!S_ISDIR(s.st_mode)) {
 			if(S_ISREG(s.st_mode)) {
-				if(!z.add_file(f.c_str()))
-					existing_files[f] = from_stat64(s);
+				on_file(f);
 			}
 		} else {
 			std::unique_ptr<DIR, void (*)(DIR*)> p_dir(opendir(f.c_str()), [](DIR *d){ if(d) closedir(d);});
@@ -196,7 +196,7 @@ namespace {
 				   std::string("..") == de->d_name)
 					continue;
 				if(DT_REG == de->d_type || DT_DIR == de->d_type)
-					r_archive_dir(combine_paths(f, de->d_name), z, existing_files);
+					r_file_find(combine_paths(f, de->d_name), on_file);
 			}
 		}
 	}
@@ -212,14 +212,25 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	// if we don't have any files, then write from scratch
 	if(ar_files.empty()) {
 		zip_f		z(ar_next_path.c_str());
-		fileset_t	existing_files;
+		auto fn_on_file = [&z](const std::string& s) -> void {
+			z.add_file(s);
+		};
 		for(int i=0; i < n; ++i)
-			r_archive_dir(in_dirs[i], z, existing_files);
+			r_file_find(in_dirs[i], fn_on_file);
 	} else {
 		// otherwise load the latest archive
 		zip_f		z_latest(ar_files.rbegin()->c_str());
 		// we need to generate a new 'delta' archive
 		zip_f		z_next(ar_next_path.c_str());
+		// then we need to get all the files
+		filelist_t	all_files;
+		{
+			auto fn_fileadd = [&all_files](const std::string& s) -> void {
+				all_files.insert(s);
+			};
+			for(int i=0; i < n; ++i)
+				r_file_find(in_dirs[i], fn_fileadd);
+		}
 		/*for(const auto& f : existing_files) {
 			const auto& zs = z.get_stat_file(f.first.c_str());
 			if(f.second.fs_mtime > zs.fs_mtime || f.second.fs_size != zs.fs_size) {
