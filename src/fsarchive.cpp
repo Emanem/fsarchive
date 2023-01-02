@@ -28,7 +28,12 @@
 #include <memory>
 #include <unordered_map>
 #include <set>
+#include <vector>
 #include <string.h>
+
+extern "C" {
+#include "bsdiff.h"
+}
 
 #include <iostream>
 
@@ -60,6 +65,8 @@ namespace {
 	typedef std::unordered_map<std::string, fsarc_stat64_t>	fileset_t;
 
 	typedef std::set<std::string>				filelist_t;
+
+	typedef std::vector<uint8_t>				buffer_t;
 
 	// utility to combine paths and cater for final /
 	// both need to be longer than 0
@@ -117,6 +124,7 @@ namespace {
 		zip_t		*z_;
 		fileset_t	f_map_;
 
+		zip_f();
 		zip_f(const zip_f&);
 		zip_f& operator=(const zip_f&);
 	public:
@@ -169,6 +177,28 @@ namespace {
 			return true;
 		}
 
+		bool extract_file(const std::string& f, buffer_t& data, fsarc_stat64_t& stat) const {
+			const auto it_f = f_map_.find(f);
+			if(f_map_.end() == it_f)
+				return false;
+			stat = it_f->second;
+			const auto z_idx = zip_name_locate(z_, f.c_str(), 0);
+			if(-1 == z_idx)
+				throw fsarchive::rt_error("Can't locate file ") << f << " in archive";
+			zip_stat_t s = {0};
+			if(zip_stat_index(z_, z_idx, 0, &s))
+				throw fsarchive::rt_error("Can't zip_stat_index file ") << f << " in archive";
+			data.resize(s.size);
+			std::unique_ptr<zip_file_t, void (*)(zip_file_t*)> z_file(
+				zip_fopen_index(z_, z_idx, 0),
+				[](zip_file_t* z){ if(z) zip_fclose(z); }
+			);
+			const auto rb = zip_fread(z_file.get(), (void*)data.data(), data.size());
+			if(rb < 0 || (uint64_t)rb != s.size)
+				throw fsarchive::rt_error("Can't full zip_fread ") << f << " in archive";
+			return true;
+		}
+
 		const fileset_t& get_fileset(void) const {
 			return f_map_;
 		}
@@ -198,6 +228,25 @@ namespace {
 					r_file_find(combine_paths(f, de->d_name), on_file);
 			}
 		}
+	}
+
+	void r_rebuild_file(const zip_f& c_fs, const std::string& f, buffer_t& data) {
+		using namespace fsarchive;
+
+		fsarc_stat64_t	s = {0};
+		if(!c_fs.extract_file(f, data, s))
+			throw fsarchive::rt_error("Can't extract file ") << f << " from archive (file not present)";
+		// then see if the file is full or not or unchanged
+		if(FS_TYPE_FILE_NEW == s.fs_type) {
+			return;
+		} else if(FS_TYPE_FILE_UNC == s.fs_type) {
+			const zip_f	p_fs(combine_paths(settings::AR_DIR, s.fs_prev));
+			r_rebuild_file(p_fs, f, data);
+			return;
+		} else if(FS_TYPE_FILE_MOD == s.fs_type) {
+			return;
+		}
+		throw fsarchive::rt_error("Invalid metadata fs_type ") << s.fs_type;
 	}
 }
 
@@ -243,6 +292,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			const auto	it_latest = latest_fileset.find(f.first);
 			if(it_latest == latest_fileset.end()) {
 				// brand new file
+				z_next.add_new_file(f.first);
 			} else if(f.second.fs_mtime > it_latest->second.fs_mtime) {
 				// changed file
 			} else {
