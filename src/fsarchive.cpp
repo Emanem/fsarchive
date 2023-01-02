@@ -30,6 +30,7 @@
 #include <set>
 #include <vector>
 #include <sstream>
+#include <fstream>
 #include <string.h>
 
 extern "C" {
@@ -90,6 +91,12 @@ namespace {
 			}
 			return -1;
 		}
+
+		int fsarc_bsdiff_write(struct bsdiff_stream* stream, const void* buffer, int size) {
+			std::stringstream	*s = (std::stringstream*)stream->opaque;
+			s->write((const char*)buffer, size);
+			return 0;
+		}
 	}
 
 	// utility to combine paths and cater for final /
@@ -98,6 +105,15 @@ namespace {
 		if('/' == *(a.rbegin()))
 			return a + b;
 		return a + '/' + b;
+	}
+
+	void load_file(const std::string& f, buffer_t& out) {
+		out.clear();
+		std::ifstream	istr(f, std::ios_base::binary);
+		const auto sz = istr.seekg(std::ios_base::end).tellg();
+		out.resize(sz);
+		if(istr.seekg(std::ios_base::beg).read((char*)out.data(), sz).tellg() != sz)
+			throw fsarchive::rt_error("Can't read binary file ") << f;
 	}
 
 	// check that a path is a valid directory
@@ -200,6 +216,60 @@ namespace {
 			f_map_[f] = fs_t;
 			return true;
 		}
+
+		bool add_bsdiff(const std::string& f, const std::string& diff, const char* prev) {
+			// if the file is already added to the archive
+			// skip it
+			if(f_map_.find(f) != f_map_.end())
+				return false;
+			std::unique_ptr<zip_source_t, void (*)(zip_source_t*)>	p_zf(
+				zip_source_buffer_create((const void*)diff.data(), diff.size(), 0, 0),
+				[](zip_source_t* p) { if(p) zip_source_close(p); }
+			);
+			if(!p_zf)
+				throw fsarchive::rt_error("Can't create buffer for diff file for zip ") << f;
+			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf.get(), ZIP_FL_ENC_GUESS);
+			if(-1 == idx)
+				throw fsarchive::rt_error("Can't add file buffer ") << f << " to the archive";
+			// now we add it, by using the stats from the filesystem
+			// but then we infor it's modified file, hence a bsdiff
+			struct stat64 s = {0};
+			if(lstat64(f.c_str(), &s))
+				throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << f;
+			const auto fs_t = fsarc_stat64_from_stat64(s, prev, FS_TYPE_FILE_MOD);
+			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
+				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
+			f_map_[f] = fs_t;
+			return true;
+		}
+
+		bool add_unchanged(const std::string& f, const char* prev) {
+			// if the file is already added to the archive
+			// skip it
+			if(f_map_.find(f) != f_map_.end())
+				return false;
+			char	data[1] = { 0x00 };
+			std::unique_ptr<zip_source_t, void (*)(zip_source_t*)>	p_zf(
+				zip_source_buffer_create((const void*)data, 0, 0, 0),
+				[](zip_source_t* p) { if(p) zip_source_close(p); }
+			);
+			if(!p_zf)
+				throw fsarchive::rt_error("Can't create buffer for unchanged file for zip ") << f;
+			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf.get(), ZIP_FL_ENC_GUESS);
+			if(-1 == idx)
+				throw fsarchive::rt_error("Can't add file buffer ") << f << " to the archive";
+			// now we add it, by using the stats from the filesystem
+			// but then we infor it's modified file, hence a bsdiff
+			struct stat64 s = {0};
+			if(lstat64(f.c_str(), &s))
+				throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << f;
+			const auto fs_t = fsarc_stat64_from_stat64(s, prev, FS_TYPE_FILE_UNC);
+			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
+				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
+			f_map_[f] = fs_t;
+			return true;
+		}
+
 
 		bool extract_file(const std::string& f, buffer_t& data, fsarc_stat64_t& stat) const {
 			const auto it_f = f_map_.find(f);
@@ -311,7 +381,8 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			r_file_find(in_dirs[i], fn_on_file);
 	} else {
 		// otherwise load the latest archive
-		zip_f		z_latest(ar_files.rbegin()->c_str());
+		const auto&	z_latest_name = *ar_files.rbegin();
+		zip_f		z_latest(combine_paths(settings::AR_DIR, z_latest_name));
 		// we need to generate a new 'delta' archive
 		zip_f		z_next(ar_next_path.c_str());
 		// then we need to get all the files
@@ -337,10 +408,29 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			if(it_latest == latest_fileset.end()) {
 				// brand new file
 				z_next.add_new_file(f.first);
-			} else if(f.second.fs_mtime > it_latest->second.fs_mtime) {
+			} else if((f.second.fs_mtime != it_latest->second.fs_mtime) ||
+				  (f.second.fs_size != it_latest->second.fs_size)) {
 				// changed file
+				// first rebuild the file
+				buffer_t	p_data;
+				r_rebuild_file(z_latest, f.first, p_data);
+				// create a bsdiff patch
+				std::stringstream	s_diff;
+				bsdiff_stream_t	bsd_s = {
+					.opaque = (void*)&s_diff,
+					.malloc = malloc,
+					.free = free,
+					.write = fsarc_bsdiff_write,
+				};
+				buffer_t	n_data;
+				load_file(f.first, n_data);
+				if(bsdiff(p_data.data(), p_data.size(), n_data.data(), n_data.size(), &bsd_s))
+					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
+				// add it finally, add it
+				z_next.add_bsdiff(f.first, s_diff.str(), z_latest_name.c_str());
 			} else {
 				// unchanged file
+				z_next.add_unchanged(f.first, z_latest_name.c_str());
 			}
 		}
 	}
