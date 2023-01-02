@@ -37,9 +37,11 @@ namespace {
 	
 	const zip_uint16_t					FS_ZIP_EXTRA_FIELD_ID = 0xe0e0;
 	
-	const uint32_t						FS_TYPE_FILE_NEW = 0,
-	      							FS_TYPE_FILE_MOD = 1,
-								FS_TYPE_FILE_DEL = 2;
+	const uint32_t						FS_TYPE_FILE_NEW = 1,
+								FS_TYPE_FILE_MOD = 2,
+								// FS_TYPE_FILE_DEL = xxx, we don't need to store deleted
+								// files because we take a new snap every time
+								FS_TYPE_FILE_UNC = 3;
 
 	typedef struct fsarc_stat64 {
 		mode_t fs_mode;
@@ -140,7 +142,7 @@ namespace {
 			}
 		}
 
-		bool add_file(const std::string& f) {
+		bool add_new_file(const std::string& f) {
 			// if the file is already added to the archive
 			// skip it
 			if(f_map_.find(f) != f_map_.end())
@@ -167,11 +169,8 @@ namespace {
 			return true;
 		}
 
-		const fsarc_stat64_t& get_stat_file(const char *f) {
-			const auto it = f_map_.find(f);
-			if(f_map_.end() == it)
-				throw fsarchive::rt_error("Can't find file ") << f << " in archive";
-			return it->second;
+		const fileset_t& get_fileset(void) const {
+			return f_map_;
 		}
 
 		~zip_f() {
@@ -213,7 +212,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	if(ar_files.empty()) {
 		zip_f		z(ar_next_path.c_str());
 		auto fn_on_file = [&z](const std::string& s) -> void {
-			z.add_file(s);
+			z.add_new_file(s);
 		};
 		for(int i=0; i < n; ++i)
 			r_file_find(in_dirs[i], fn_on_file);
@@ -223,21 +222,32 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		// we need to generate a new 'delta' archive
 		zip_f		z_next(ar_next_path.c_str());
 		// then we need to get all the files
-		filelist_t	all_files;
+		fileset_t	all_files;
 		{
 			auto fn_fileadd = [&all_files](const std::string& s) -> void {
-				all_files.insert(s);
+				struct stat64 st = {0};
+				if(lstat64(s.c_str(), &st))
+					throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << s;
+				all_files[s] = from_stat64(st);
 			};
 			for(int i=0; i < n; ++i)
 				r_file_find(in_dirs[i], fn_fileadd);
 		}
-		/*for(const auto& f : existing_files) {
-			const auto& zs = z.get_stat_file(f.first.c_str());
-			if(f.second.fs_mtime > zs.fs_mtime || f.second.fs_size != zs.fs_size) {
-				std::cout << "File " << f.first << " has changed: " << f.second.fs_mtime << "\t" << zs.fs_mtime << std::endl;
-				if(!z_delta.add_file(f.first.c_str()))
-					throw fsarchive::rt_error("Can't add file ") << f.first << " to delta archive " << ar_delta_path;
+		// then we should have 3 'sets'
+		// * new files
+		// * mod(ified) files
+		// * unc(changed) files
+		// and we should manage accordingly
+		const auto&	latest_fileset = z_latest.get_fileset();
+		for(const auto& f : all_files) {
+			const auto	it_latest = latest_fileset.find(f.first);
+			if(it_latest == latest_fileset.end()) {
+				// brand new file
+			} else if(f.second.fs_mtime > it_latest->second.fs_mtime) {
+				// changed file
+			} else {
+				// unchanged file
 			}
-		}*/
+		}
 	}
 }
