@@ -28,14 +28,35 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <string.h>
 
 #include <iostream>
 
 namespace {
 	const char						*FS_ARCHIVE_MAIN = "fsarchive_main.zip",
 	      							*FS_ARCHIVE_DELTA = "fsarchive_delta_";
+	
 	const zip_uint16_t					FS_ZIP_EXTRA_FIELD_ID = 0xe0e0;
-	typedef std::unordered_map<std::string, struct stat64>	fileset_t;
+	
+	const uint32_t						FS_TYPE_FILE_NEW = 0,
+	      							FS_TYPE_FILE_MOD = 1,
+								FS_TYPE_FILE_DEL = 2;
+
+	typedef struct fsarc_stat64 {
+		mode_t fs_mode;
+		uid_t fs_uid;
+		gid_t fs_gid;
+		uint32_t fs_type;
+		time_t fs_atime;
+		time_t fs_mtime;
+		time_t fs_ctime;
+		off64_t fs_size;
+		char	fs_prev[32];
+	} fsarc_stat64_t;
+
+	static_assert(sizeof(fsarc_stat64_t) == (48 + 32), "sizeof(fsarc_stat64_t) is not 48 + 32 bytes");
+
+	typedef std::unordered_map<std::string, fsarc_stat64_t>	fileset_t;
 
 	// utility to combine paths and cater for final /
 	// both need to be longer than 0
@@ -63,6 +84,25 @@ namespace {
 		return true;
 	}
 
+	fsarc_stat64_t from_stat64(const struct stat64& s, const char* prev = 0, const uint32_t type = FS_TYPE_FILE_NEW) {
+		fsarc_stat64_t	fs_t = {0};
+		fs_t.fs_mode = s.st_mode;
+		fs_t.fs_uid = s.st_uid;
+		fs_t.fs_gid = s.st_gid;
+		fs_t.fs_type = type;
+		fs_t.fs_atime = s.st_atime;
+		fs_t.fs_mtime = s.st_mtime;
+		fs_t.fs_ctime = s.st_ctime;
+		fs_t.fs_size = s.st_size;
+		if(prev) {
+			memcpy(fs_t.fs_prev, prev, 32);
+			fs_t.fs_prev[31] = '\0';
+		} else {
+			fs_t.fs_prev[0] = '\0';
+		}
+		return fs_t;
+	}
+
 	class zip_f {
 		zip_t		*z_;
 		fileset_t	f_map_;
@@ -84,7 +124,7 @@ namespace {
 				zip_uint16_t	len = 0;
 				const auto *pf = zip_file_extra_field_get_by_id(z_, i, FS_ZIP_EXTRA_FIELD_ID, 0, &len, ZIP_FL_LOCAL);
 				if(pf) {
-					f_map_[st.name] = *(struct stat64*)pf;
+					f_map_[st.name] = *(fsarc_stat64_t*)pf;
 				} else {
 					zip_close(z_);
 					throw fsarchive::rt_error("Couldn't find FS_ZIP_EXTRA_FIELD_ID for file ") << st.name;
@@ -92,7 +132,7 @@ namespace {
 			}
 		}
 
-		bool add_file(const char* f) {
+		bool add_file(const char* f, const char* prev = 0) {
 			// if the file is already added to the archive
 			// skip it
 			if(f_map_.find(f) != f_map_.end())
@@ -112,13 +152,14 @@ namespace {
 			struct stat64 s = {0};
 			if(lstat64(f, &s))
 				throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << f;
-			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&s, sizeof(s), ZIP_FL_LOCAL))
+			const auto fs_t = from_stat64(s, prev);
+			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
-			f_map_[f] = s;
+			f_map_[f] = fs_t;
 			return true;
 		}
 
-		const struct stat64& get_stat_file(const char *f) {
+		const fsarc_stat64_t& get_stat_file(const char *f) {
 			const auto it = f_map_.find(f);
 			if(f_map_.end() == it)
 				throw fsarchive::rt_error("Can't find file ") << f << " in archive";
@@ -137,7 +178,7 @@ namespace {
 		if(!S_ISDIR(s.st_mode)) {
 			if(S_ISREG(s.st_mode)) {
 				if(!z.add_file(f.c_str()))
-					existing_files[f] = s;
+					existing_files[f] = from_stat64(s);
 			}
 		} else {
 			std::unique_ptr<DIR, void (*)(DIR*)> p_dir(opendir(f.c_str()), [](DIR *d){ if(d) closedir(d);});
@@ -176,8 +217,8 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		zip_f		z_delta(ar_delta_path.c_str());
 		for(const auto& f : existing_files) {
 			const auto& zs = z.get_stat_file(f.first.c_str());
-			if(f.second.st_mtime > zs.st_mtime || f.second.st_size != zs.st_size) {
-				std::cout << "File " << f.first << " has changed: " << f.second.st_mtime << "\t" << zs.st_mtime << std::endl;
+			if(f.second.fs_mtime > zs.fs_mtime || f.second.fs_size != zs.fs_size) {
+				std::cout << "File " << f.first << " has changed: " << f.second.fs_mtime << "\t" << zs.fs_mtime << std::endl;
 				if(!z_delta.add_file(f.first.c_str()))
 					throw fsarchive::rt_error("Can't add file ") << f.first << " to delta archive " << ar_delta_path;
 			}
