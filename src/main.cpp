@@ -17,10 +17,10 @@
 *	along with fsarchive.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include <iostream>
 #include <exception>
 #include "settings.h"
 #include "fsarchive.h"
+#include "log.h"
 
 namespace {
 	const char*	__version__ = "0.1";
@@ -40,9 +40,11 @@ int main(int argc, char *argv[]) {
 			fsarchive::restore_archive();
 		}
 	} catch(const std::exception& e) {
-		std::cerr << "Exception: " << e.what() << std::endl;
+		LOG_ERROR << "Exception: " << e.what();
+		return 1;
 	} catch(...) {
-		std::cerr << "Unknown exception" << std::endl;
+		LOG_ERROR << "Unknown exception";
+		return 1;
 	}
 }
 

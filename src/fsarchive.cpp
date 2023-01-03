@@ -20,6 +20,7 @@
 #include "fsarchive.h"
 #include "settings.h"
 #include "utils.h"
+#include "log.h"
 #include <zip.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -204,13 +205,16 @@ namespace {
 					throw fsarchive::rt_error("Couldn't find FS_ZIP_EXTRA_FIELD_ID for file ") << st.name;
 				}
 			}
+			LOG_INFO << "Opened zip '" <<  fname << "' with " << f_map_.size() << " entries, id " << z_;
 		}
 
 		bool add_new_file(const std::string& f) {
 			// if the file is already added to the archive
 			// skip it
-			if(f_map_.find(f) != f_map_.end())
+			if(f_map_.find(f) != f_map_.end()) {
+				LOG_WARNING << "Couldn't add file '" << f << "' to archive " << z_ << "; already existing";
 				return false;
+			}
 			zip_source_t	*p_zf = zip_source_file_create(f.c_str(), 0, -1, 0);
 			if(!p_zf)
 				throw fsarchive::rt_error("Can't open source file for zip ") << f;
@@ -229,6 +233,7 @@ namespace {
 			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
 			f_map_[f] = fs_t;
+			LOG_INFO << "File '" << f << "' added to archive " << z_;
 			return true;
 		}
 
@@ -296,8 +301,10 @@ namespace {
 
 		bool extract_file(const std::string& f, buffer_t& data, fsarc_stat64_t& stat) const {
 			const auto it_f = f_map_.find(f);
-			if(f_map_.end() == it_f)
+			if(f_map_.end() == it_f) {
+				LOG_WARNING << "Can't extract/find file '" << f << "' in archive " << z_;
 				return false;
+			}
 			stat = it_f->second;
 			const auto z_idx = zip_name_locate(z_, f.c_str(), 0);
 			if(-1 == z_idx)
@@ -313,6 +320,7 @@ namespace {
 			const auto rb = zip_fread(z_file.get(), (void*)data.data(), data.size());
 			if(rb < 0 || (uint64_t)rb != s.size)
 				throw fsarchive::rt_error("Can't full zip_fread ") << f << " in archive";
+			LOG_INFO << "File '" << f << "' extracted from archive " << z_;
 			return true;
 		}
 
@@ -322,6 +330,7 @@ namespace {
 
 		~zip_f() {
 			zip_close(z_);
+			LOG_SPAM << "Closed zip, id " << z_;
 		}
 	};
 
@@ -358,12 +367,14 @@ namespace {
 		// then see if the file is full or not or unchanged
 		if(FS_TYPE_FILE_NEW == s.fs_type) {
 			// if the file is new, nothing to do
+			LOG_INFO << "File '" << f << "' has been rebuilt as is (NEW)";
 			return;
 		} else if(FS_TYPE_FILE_UNC == s.fs_type) {
 			// if ile is unchanged, fetch it from the correct
 			// prev entry
 			const zip_f	p_fs(combine_paths(settings::AR_DIR, s.fs_prev));
 			r_rebuild_file(p_fs, f, data);
+			LOG_INFO << "File '" << f << "' has been forwarded as is (UNC) from " << s.fs_prev;
 			return;
 		} else if(FS_TYPE_FILE_MOD == s.fs_type) {
 			// if the file is modified, we first need to
@@ -383,6 +394,7 @@ namespace {
 			if(bspatch(p_data.data(), p_data.size(), n_data.data(), n_data.size(), &bsp_s))
 				throw fsarchive::rt_error("Couldn't patch file ") << f << " from archive";
 			data.swap(n_data);
+			LOG_INFO << "File '" << f << "' has been patched (MOD) from " << s.fs_prev;
 			return;
 		}
 		throw fsarchive::rt_error("Invalid metadata fs_type ") << s.fs_type;
@@ -398,6 +410,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	check_dir_fsarchives(settings::AR_DIR, ar_next_path, ar_files);
 	// if we don't have any files, then write from scratch
 	if(ar_files.empty()) {
+		LOG_INFO << "Building an archive from scratch: " << ar_next_path;
 		zip_f		z(ar_next_path.c_str());
 		auto fn_on_file = [&z](const std::string& s) -> void {
 			z.add_new_file(s);
@@ -406,6 +419,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			r_file_find(in_dirs[i], fn_on_file);
 	} else {
 		// otherwise load the latest archive
+		LOG_INFO << "Building a delta archive: " << *ar_files.rbegin() << " -> " << ar_next_path;
 		const auto&	z_latest_name = *ar_files.rbegin();
 		zip_f		z_latest(combine_paths(settings::AR_DIR, z_latest_name));
 		// we need to generate a new 'delta' archive
@@ -453,9 +467,11 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
 				// and finally add it
 				z_next.add_bsdiff(f.first, s_diff.str(), z_latest_name.c_str());
+				LOG_INFO << "File '" << f.first << "' has been added as changed (MOD)";
 			} else {
 				// unchanged file
 				z_next.add_unchanged(f.first, z_latest_name.c_str());
+				LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC)";
 			}
 		}
 	}
