@@ -31,6 +31,13 @@ int main(int argc, char *argv[]) {
 		const int args_idx = fsarchive::parse_args(argc, argv, argv[0], __version__);
 		if (fsarchive::settings::AR_ADD) {
 			fsarchive::init_update_archive(argv + args_idx, argc - args_idx);
+		} else {
+			// in case the name of RE_FILE contains a '/'
+			// set the same for AR_DIR
+			const auto	it_l_slash = fsarchive::settings::RE_FILE.find_last_of('/');
+			if(it_l_slash != std::string::npos)
+				fsarchive::settings::AR_DIR = fsarchive::settings::RE_FILE.substr(0, it_l_slash+1);
+			fsarchive::restore_archive();
 		}
 	} catch(const std::exception& e) {
 		std::cerr << "Exception: " << e.what() << std::endl;

@@ -27,6 +27,8 @@ namespace fsarchive {
 	namespace settings {
 		extern bool		AR_ADD;
 		extern std::string	AR_DIR;
+		extern std::string	RE_FILE;
+		extern std::string	RE_DIR;
 	}
 
 	int parse_args(int argc, char *argv[], const char *prog, const char *version);

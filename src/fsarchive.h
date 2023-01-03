@@ -22,6 +22,7 @@
 
 namespace fsarchive {
 	void	init_update_archive(char *in_dirs[], const int n);
+	void	restore_archive(void);
 }
 
 #endif //_FSARCHIVE_H_

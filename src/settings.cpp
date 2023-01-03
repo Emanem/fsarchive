@@ -30,9 +30,12 @@ namespace {
 		using namespace fsarchive::settings;
 
 		std::cerr <<	"Usage: " << prog << " [options]\nExecutes fsarchive " << version << "\n\n"
-				"-a, --archive (dir) Archives all input files and directories inside (dir)/fsarchive_main.zip\n"
-				"                    and/or updates existing archives generating a (dir)/fsarchive_<timestamp>.zip\n"
-				"    --help          Prints this help and exit\n\n"
+				"-a, --archive (dir)     Archives all input files and directories inside (dir)/fsarchive_<timestamp>.zip\n"
+				"                        and/or updates existing archives generating a new (dir)/fsarchive_<timestamp>.zip\n"
+				"-r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so\n"
+				"                        Specify -d to allow another directory to be the target destination for the restore\n"
+				"-d, --restore-dir (dir) Set the restore directory to this location\n"
+				"    --help              Prints this help and exit\n\n"
 		<< std::flush;
 	}
 }
@@ -41,6 +44,8 @@ namespace fsarchive {
 	namespace settings {
 		bool		AR_ADD = true;
 		std::string	AR_DIR = "";
+		std::string	RE_FILE = "";
+		std::string	RE_DIR = "";
 	}
 }
 
@@ -51,6 +56,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 	static struct option	long_options[] = {
 		{"help",	no_argument,	   0,	0},
 		{"archive",	required_argument, 0,	'a'},
+		{"restore",	required_argument, 0,	'r'},
+		{"restore-dir",	required_argument, 0,	'd'},
 		{0, 0, 0, 0}
 	};
 	
@@ -58,7 +65,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
         	// getopt_long stores the option index here
         	int		option_index = 0;
 
-		if(-1 == (c = getopt_long(argc, argv, "ha:", long_options, &option_index)))
+		if(-1 == (c = getopt_long(argc, argv, "ha:r:d:", long_options, &option_index)))
        			break;
 
 		switch (c) {
@@ -75,6 +82,16 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		case 'a': {
 			AR_DIR = optarg;
 			AR_ADD = true;
+		} break;
+
+		case 'r': {
+			RE_FILE = optarg;
+			AR_ADD = false;
+		} break;
+
+		case 'd': {
+			RE_DIR = optarg;
+			AR_ADD = false;
 		} break;
 
 		case '?':

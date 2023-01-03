@@ -104,15 +104,30 @@ namespace {
 	std::string combine_paths(const std::string& a, const std::string& b) {
 		if('/' == *(a.rbegin()))
 			return a + b;
-		return a + '/' + b;
+		return (!a.empty()) ? a + '/' + b : b;
+	}
+
+	void init_paths(const std::string& s, mode_t mode = 0755) {
+		size_t		pos=0;
+		std::string	dir;
+
+		if(s[s.size()-1]!='/')
+			throw fsarchive::rt_error("Have to pass a path ending with '/' ") << dir;
+
+		while((pos=s.find_first_of('/',pos))!=std::string::npos){
+			dir=s.substr(0,pos++);
+			if(dir.size()==0) continue; // if leading / first time is 0 length
+			if(mkdir(dir.c_str(),mode) && errno!=EEXIST)
+				throw fsarchive::rt_error("Can't init path ") << dir;
+		}
 	}
 
 	void load_file(const std::string& f, buffer_t& out) {
 		out.clear();
 		std::ifstream	istr(f, std::ios_base::binary);
-		const auto sz = istr.seekg(std::ios_base::end).tellg();
+		const auto sz = istr.seekg(0, std::ios_base::end).tellg();
 		out.resize(sz);
-		if(istr.seekg(std::ios_base::beg).read((char*)out.data(), sz).tellg() != sz)
+		if(istr.seekg(0, std::ios_base::beg).read((char*)out.data(), sz).tellg() != sz)
 			throw fsarchive::rt_error("Can't read binary file ") << f;
 	}
 
@@ -161,8 +176,9 @@ namespace {
 	}
 
 	class zip_f {
-		zip_t		*z_;
-		fileset_t	f_map_;
+		static const char	NO_DATA;
+		zip_t			*z_;
+		fileset_t		f_map_;
 
 		zip_f();
 		zip_f(const zip_f&);
@@ -195,15 +211,14 @@ namespace {
 			// skip it
 			if(f_map_.find(f) != f_map_.end())
 				return false;
-			std::unique_ptr<zip_source_t, void (*)(zip_source_t*)>	p_zf(
-				zip_source_file_create(f.c_str(), 0, -1, 0),
-				[](zip_source_t* p) { if(p) zip_source_close(p); }
-			);
+			zip_source_t	*p_zf = zip_source_file_create(f.c_str(), 0, -1, 0);
 			if(!p_zf)
 				throw fsarchive::rt_error("Can't open source file for zip ") << f;
-			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf.get(), ZIP_FL_ENC_GUESS);
-			if(-1 == idx)
+			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf, ZIP_FL_ENC_GUESS);
+			if(-1 == idx) {
+				zip_source_free(p_zf);
 				throw fsarchive::rt_error("Can't add file ") << f << " to the archive";
+			}
 			// https://libzip.org/documentation/zip_file_extra_field_set.html
 			// we can't use the info libzip stamps because the mtime is off
 			// by one usecond, plus we need to store additional metadata
@@ -222,15 +237,25 @@ namespace {
 			// skip it
 			if(f_map_.find(f) != f_map_.end())
 				return false;
-			std::unique_ptr<zip_source_t, void (*)(zip_source_t*)>	p_zf(
-				zip_source_buffer_create((const void*)diff.data(), diff.size(), 0, 0),
-				[](zip_source_t* p) { if(p) zip_source_close(p); }
-			);
-			if(!p_zf)
+			// in short, we have to duplicate the buffer...
+			// https://stackoverflow.com/questions/73820283/add-multiple-files-from-buffers-to-zip-archive-using-libzip
+			// https://stackoverflow.com/questions/73721970/how-to-construct-a-zip-file-with-libzip
+			// https://stackoverflow.com/questions/74988236/can-libzip-reliably-write-in-zip-archives-from-buffers-memory-not-files
+			// this is not great...
+			uint8_t		*dup_diff = (uint8_t*)malloc(diff.size());
+			if(!dup_diff)
+				throw fsarchive::rt_error("Can't duplicate buffer to insert diff file in zip ") << f;
+			memcpy(dup_diff, diff.data(), diff.size());
+			zip_source_t	*p_zf = zip_source_buffer(z_, (const void*)dup_diff, diff.size(), 1);
+			if(!p_zf) {
+				free(dup_diff);
 				throw fsarchive::rt_error("Can't create buffer for diff file for zip ") << f;
-			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf.get(), ZIP_FL_ENC_GUESS);
-			if(-1 == idx)
+			}
+			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf, ZIP_FL_ENC_GUESS);
+			if(-1 == idx) {
+				zip_source_free(p_zf);
 				throw fsarchive::rt_error("Can't add file buffer ") << f << " to the archive";
+			}
 			// now we add it, by using the stats from the filesystem
 			// but then we infor it's modified file, hence a bsdiff
 			struct stat64 s = {0};
@@ -248,16 +273,14 @@ namespace {
 			// skip it
 			if(f_map_.find(f) != f_map_.end())
 				return false;
-			char	data[1] = { 0x00 };
-			std::unique_ptr<zip_source_t, void (*)(zip_source_t*)>	p_zf(
-				zip_source_buffer_create((const void*)data, 0, 0, 0),
-				[](zip_source_t* p) { if(p) zip_source_close(p); }
-			);
+			zip_source_t	*p_zf = zip_source_buffer(z_, (const void*)&NO_DATA, 0, 0);
 			if(!p_zf)
 				throw fsarchive::rt_error("Can't create buffer for unchanged file for zip ") << f;
-			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf.get(), ZIP_FL_ENC_GUESS);
-			if(-1 == idx)
+			const zip_int64_t idx = zip_file_add(z_, f.c_str(), p_zf, ZIP_FL_ENC_GUESS);
+			if(-1 == idx) {
+				zip_source_free(p_zf);
 				throw fsarchive::rt_error("Can't add file buffer ") << f << " to the archive";
+			}
 			// now we add it, by using the stats from the filesystem
 			// but then we infor it's modified file, hence a bsdiff
 			struct stat64 s = {0};
@@ -301,6 +324,8 @@ namespace {
 			zip_close(z_);
 		}
 	};
+
+	const char	zip_f::NO_DATA = 0x00;
 
 	template<typename fn_on_file>
 	void r_file_find(const std::string& f, fn_on_file&& on_file) {
@@ -397,7 +422,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			for(int i=0; i < n; ++i)
 				r_file_find(in_dirs[i], fn_fileadd);
 		}
-		// then we should have 3 'sets'
+		// then we should have 3 logical 'sets'
 		// * new files
 		// * mod(ified) files
 		// * unc(changed) files
@@ -426,7 +451,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				load_file(f.first, n_data);
 				if(bsdiff(p_data.data(), p_data.size(), n_data.data(), n_data.size(), &bsd_s))
 					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
-				// add it finally, add it
+				// and finally add it
 				z_next.add_bsdiff(f.first, s_diff.str(), z_latest_name.c_str());
 			} else {
 				// unchanged file
@@ -435,3 +460,27 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		}
 	}
 }
+
+void fsarchive::restore_archive(void) {
+	using namespace fsarchive;
+
+	struct stat64 s = {0};
+	if(settings::RE_FILE.empty() || lstat64(settings::RE_FILE.c_str(), &s) || !S_ISREG(s.st_mode))
+		throw fsarchive::rt_error("Archive to restore is empty and/or file doesn't exist/is not accessible ") << settings::RE_FILE;
+
+	zip_f	z(settings::RE_FILE);
+
+	const auto&	re_fs = z.get_fileset();
+	for(const auto& f : re_fs) {
+		const std::string	out_file = (f.first[0] != '/' && !settings::RE_DIR.empty()) ? combine_paths(settings::RE_DIR + '/', f.first) : f.first;
+		const auto		it_l_slash = out_file.find_last_of('/');
+		if(it_l_slash != std::string::npos)
+			init_paths(out_file.substr(0, it_l_slash+1));
+		buffer_t	buf_file;
+		r_rebuild_file(z, f.first, buf_file);
+		std::ofstream	ostr(out_file, std::ios_base::binary);
+		if((long int)buf_file.size() != ostr.write((const char*)buf_file.data(), buf_file.size()).tellp())
+			throw fsarchive::rt_error("Can't restore file ") << f.first << " on the disk " << out_file;
+	}
+}
+
