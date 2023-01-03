@@ -209,7 +209,7 @@ namespace {
 			return true;
 		}
 	public:
-		zip_f(const std::string& fname) : z_(zip_open(fname.c_str(), ZIP_CREATE, 0)) {
+		zip_f(const std::string& fname, const bool ro) : z_(zip_open(fname.c_str(), (ro) ? ZIP_RDONLY : (ZIP_CREATE | ZIP_EXCL), 0)) {
 			if(!z_)
 				throw fsarchive::rt_error("Can't open/create zip archive ") << fname;
 			// populate the entries
@@ -337,7 +337,7 @@ namespace {
 		} else if(FS_TYPE_FILE_UNC == s.fs_type) {
 			// if ile is unchanged, fetch it from the correct
 			// prev entry
-			const zip_f	p_fs(combine_paths(settings::AR_DIR, s.fs_prev));
+			const zip_f	p_fs(combine_paths(settings::AR_DIR, s.fs_prev), true);
 			r_rebuild_file(p_fs, f, data);
 			LOG_INFO << "File '" << f << "' has been forwarded as is (UNC) from " << s.fs_prev;
 			return;
@@ -345,7 +345,7 @@ namespace {
 			// if the file is modified, we first need to
 			// - get the original
 			buffer_t	p_data;
-			const zip_f	p_fs(combine_paths(settings::AR_DIR, s.fs_prev));
+			const zip_f	p_fs(combine_paths(settings::AR_DIR, s.fs_prev), true);
 			r_rebuild_file(p_fs, f, p_data);
 			// - apply current patch
 			// s will contain the full size of the patched file
@@ -376,7 +376,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	// if we don't have any files, then write from scratch
 	if(ar_files.empty()) {
 		LOG_INFO << "Building an archive from scratch: " << ar_next_path;
-		zip_f		z(ar_next_path.c_str());
+		zip_f		z(ar_next_path.c_str(), false);
 		auto fn_on_file = [&z](const std::string& s) -> void {
 			z.add_new_file(s);
 			LOG_INFO << "File '" << s << "' has been added as new (NEW)";
@@ -387,9 +387,9 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		// otherwise load the latest archive
 		LOG_INFO << "Building a delta archive: " << *ar_files.rbegin() << " -> " << ar_next_path;
 		const auto&	z_latest_name = *ar_files.rbegin();
-		zip_f		z_latest(combine_paths(settings::AR_DIR, z_latest_name));
+		zip_f		z_latest(combine_paths(settings::AR_DIR, z_latest_name), true);
 		// we need to generate a new 'delta' archive
-		zip_f		z_next(ar_next_path.c_str());
+		zip_f		z_next(ar_next_path.c_str(), false);
 		// then we need to get all the files
 		fileset_t	all_files;
 		{
@@ -454,7 +454,7 @@ void fsarchive::restore_archive(void) {
 	if(settings::RE_FILE.empty() || lstat64(settings::RE_FILE.c_str(), &s) || !S_ISREG(s.st_mode))
 		throw fsarchive::rt_error("Archive to restore is empty and/or file doesn't exist/is not accessible ") << settings::RE_FILE;
 
-	zip_f	z(settings::RE_FILE);
+	zip_f	z(settings::RE_FILE, true);
 
 	const auto&	re_fs = z.get_fileset();
 	for(const auto& f : re_fs) {
