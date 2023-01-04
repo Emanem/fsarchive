@@ -301,16 +301,17 @@ namespace {
 
 	const char	zip_f::NO_DATA = 0x00;
 
-	template<typename fn_on_file>
-	void r_file_find(const std::string& f, fn_on_file&& on_file) {
+	template<typename fn_on_elem>
+	void r_fs_scan(const std::string& f, fn_on_elem&& on_elem) {
 		struct stat64 s = {0};
 		if(lstat64(f.c_str(), &s))
 			throw fsarchive::rt_error("Invalid/unable to lstat64 file/directory: ") << f;
 		if(!S_ISDIR(s.st_mode)) {
 			if(S_ISREG(s.st_mode)) {
-				on_file(f);
+				on_elem(f, s);
 			}
 		} else {
+			on_elem(f, s);
 			std::unique_ptr<DIR, void (*)(DIR*)> p_dir(opendir(f.c_str()), [](DIR *d){ if(d) closedir(d);});
 			struct dirent64	*de = 0;
 			while((de = readdir64(p_dir.get()))) {
@@ -318,7 +319,7 @@ namespace {
 				   std::string("..") == de->d_name)
 					continue;
 				if(DT_REG == de->d_type || DT_DIR == de->d_type)
-					r_file_find(combine_paths(f, de->d_name), on_file);
+					r_fs_scan(combine_paths(f, de->d_name), on_elem);
 			}
 		}
 	}
@@ -377,12 +378,14 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	if(ar_files.empty()) {
 		LOG_INFO << "Building an archive from scratch: " << ar_next_path;
 		zip_f		z(ar_next_path.c_str(), false);
-		auto fn_on_file = [&z](const std::string& s) -> void {
-			z.add_new_file(s);
-			LOG_INFO << "File '" << s << "' has been added as new (NEW)";
+		auto fn_on_elem = [&z](const std::string& f, const struct stat64& s) -> void {
+			if(S_ISREG(s.st_mode)) {
+				z.add_new_file(f);
+				LOG_INFO << "File '" << f << "' has been added as new (NEW)";
+			}
 		};
 		for(int i=0; i < n; ++i)
-			r_file_find(in_dirs[i], fn_on_file);
+			r_fs_scan(in_dirs[i], fn_on_elem);
 	} else {
 		// otherwise load the latest archive
 		LOG_INFO << "Building a delta archive: " << *ar_files.rbegin() << " -> " << ar_next_path;
@@ -393,14 +396,12 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		// then we need to get all the files
 		fileset_t	all_files;
 		{
-			auto fn_fileadd = [&all_files](const std::string& s) -> void {
-				struct stat64 st = {0};
-				if(lstat64(s.c_str(), &st))
-					throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << s;
-				all_files[s] = fsarc_stat64_from_stat64(st);
+			auto fn_fileadd = [&all_files](const std::string& f, const struct stat64& s) -> void {
+				if(S_ISREG(s.st_mode))
+					all_files[f] = fsarc_stat64_from_stat64(s);
 			};
 			for(int i=0; i < n; ++i)
-				r_file_find(in_dirs[i], fn_fileadd);
+				r_fs_scan(in_dirs[i], fn_fileadd);
 		}
 		// then we should have 3 logical 'sets'
 		// * new files
