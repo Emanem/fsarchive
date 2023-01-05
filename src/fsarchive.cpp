@@ -26,6 +26,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <utime.h>
 #include <memory>
 #include <unordered_map>
 #include <set>
@@ -499,6 +500,18 @@ void fsarchive::restore_archive(void) {
 		std::ofstream	ostr(out_file, std::ios_base::binary);
 		if((long int)buf_file.size() != ostr.write((const char*)buf_file.data(), buf_file.size()).tellp())
 			throw fsarchive::rt_error("Can't restore file ") << f.first << " on the disk " << out_file;
+	}
+	// then change all permissions/ownership/etc etc
+	for(const auto& f : re_fs) {
+		const std::string	out_file = (f.first[0] != '/' && !settings::RE_DIR.empty()) ? combine_paths(settings::RE_DIR + '/', f.first) : f.first;
+		if(chmod(out_file.c_str(), 07777 & f.second.fs_mode))
+			LOG_WARNING << "Can't set permissions for file/directory " << out_file;
+		// the below cast should work because the structure is aligned
+		// with the spec of utime data structure https://linux.die.net/man/2/utime
+		if(utime(out_file.c_str(), (const struct utimbuf *)&f.second.fs_atime))
+			LOG_WARNING << "Can't update times for file/directory " << out_file;
+		if(chown(out_file.c_str(), f.second.fs_uid, f.second.fs_gid))
+			LOG_WARNING << "Can't set user/group id for file/directory " << out_file;
 	}
 }
 
