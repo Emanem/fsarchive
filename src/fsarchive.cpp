@@ -264,6 +264,21 @@ namespace {
 			return add_data(p_zf, f, prev, FS_TYPE_FILE_UNC);
 		}
 
+		bool add_directory(const std::string& d) {
+			const auto d_idx = zip_dir_add(z_, d.c_str(), ZIP_FL_ENC_GUESS);
+			if(-1 == d_idx)
+				throw fsarchive::rt_error("Can't add directory ") << d << " to archive";
+			struct stat64 s = {0};
+			if(lstat64(d.c_str(), &s))
+				throw fsarchive::rt_error("Invalid/unable to lstat64 directory: ") << d;
+			const auto fs_t = fsarc_stat64_from_stat64(s);
+			if(zip_file_extra_field_set(z_, d_idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
+				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for directory ") << d;
+			f_map_[d] = fs_t;
+			LOG_INFO << "Directory '" << d << "' added to archive " << z_;
+			return true;
+		}
+
 		bool extract_file(const std::string& f, buffer_t& data, fsarc_stat64_t& stat) const {
 			const auto it_f = f_map_.find(f);
 			if(f_map_.end() == it_f) {
@@ -382,6 +397,9 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			if(S_ISREG(s.st_mode)) {
 				z.add_new_file(f);
 				LOG_INFO << "File '" << f << "' has been added as new (NEW)";
+			} else if (S_ISDIR(s.st_mode)) {
+				z.add_directory(f);
+				LOG_INFO << "Directory '" << f << "' has been added";
 			}
 		};
 		for(int i=0; i < n; ++i)
@@ -397,7 +415,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		fileset_t	all_files;
 		{
 			auto fn_fileadd = [&all_files](const std::string& f, const struct stat64& s) -> void {
-				if(S_ISREG(s.st_mode))
+				if(S_ISREG(s.st_mode) || S_ISDIR(s.st_mode))
 					all_files[f] = fsarc_stat64_from_stat64(s);
 			};
 			for(int i=0; i < n; ++i)
@@ -410,6 +428,13 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		// and we should manage accordingly
 		const auto&	latest_fileset = z_latest.get_fileset();
 		for(const auto& f : all_files) {
+			// if f is a directory, just add it to the new archive
+			if(S_ISDIR(f.second.fs_mode)) {
+				z_next.add_directory(f.first);
+				LOG_INFO << "Directory '" << f.first << "' has been added";
+				continue;
+			}
+			// otherwise carry on...
 			const auto	it_latest = latest_fileset.find(f.first);
 			if(it_latest == latest_fileset.end()) {
 				// brand new file
@@ -460,6 +485,12 @@ void fsarchive::restore_archive(void) {
 	const auto&	re_fs = z.get_fileset();
 	for(const auto& f : re_fs) {
 		const std::string	out_file = (f.first[0] != '/' && !settings::RE_DIR.empty()) ? combine_paths(settings::RE_DIR + '/', f.first) : f.first;
+		// if the current file is a directory, add it and carry on
+		if(S_ISDIR(f.second.fs_mode)) {
+			init_paths(out_file);
+			LOG_INFO << "Directory '" << out_file << "' restored";
+			continue;
+		}
 		const auto		it_l_slash = out_file.find_last_of('/');
 		if(it_l_slash != std::string::npos)
 			init_paths(out_file.substr(0, it_l_slash+1));
