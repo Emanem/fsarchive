@@ -205,7 +205,7 @@ namespace {
 			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
 			f_map_[f] = fs_t;
-			LOG_INFO << "File/data '" << f << "' (type " << type << ") added to archive " << z_;
+			LOG_SPAM << "File/data '" << f << "' (type " << type << ") added to archive " << z_;
 			return true;
 		}
 	public:
@@ -232,14 +232,14 @@ namespace {
 			LOG_INFO << "Opened zip '" <<  fname << "' with " << f_map_.size() << " entries, id " << z_;
 		}
 
-		bool add_new_file(const std::string& f) {
+		bool add_file_new(const std::string& f) {
 			zip_source_t	*p_zf = zip_source_file_create(f.c_str(), 0, -1, 0);
 			if(!p_zf)
 				throw fsarchive::rt_error("Can't open source file for zip ") << f;
 			return add_data(p_zf, f, 0, FS_TYPE_FILE_NEW);
 		}
 
-		bool add_bsdiff(const std::string& f, const std::string& diff, const char* prev) {
+		bool add_file_bsdiff(const std::string& f, const std::string& diff, const char* prev) {
 			// in short, we have to duplicate the buffer...
 			// https://stackoverflow.com/questions/73820283/add-multiple-files-from-buffers-to-zip-archive-using-libzip
 			// https://stackoverflow.com/questions/73721970/how-to-construct-a-zip-file-with-libzip
@@ -257,7 +257,7 @@ namespace {
 			return add_data(p_zf, f, prev, FS_TYPE_FILE_MOD);
 		}
 
-		bool add_unchanged(const std::string& f, const char* prev) {
+		bool add_file_unchanged(const std::string& f, const char* prev) {
 			zip_source_t	*p_zf = zip_source_buffer(z_, (const void*)&NO_DATA, 0, 0);
 			if(!p_zf)
 				throw fsarchive::rt_error("Can't create buffer for unchanged file for zip ") << f;
@@ -275,7 +275,7 @@ namespace {
 			if(zip_file_extra_field_set(z_, d_idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for directory ") << d;
 			f_map_[d] = fs_t;
-			LOG_INFO << "Directory '" << d << "' added to archive " << z_;
+			LOG_SPAM << "Directory '" << d << "' added to archive " << z_;
 			return true;
 		}
 
@@ -300,7 +300,7 @@ namespace {
 			const auto rb = zip_fread(z_file.get(), (void*)data.data(), data.size());
 			if(rb < 0 || (uint64_t)rb != s.size)
 				throw fsarchive::rt_error("Can't full zip_fread ") << f << " in archive";
-			LOG_INFO << "File '" << f << "' extracted from archive " << z_;
+			LOG_SPAM << "File '" << f << "' extracted from archive " << z_;
 			return true;
 		}
 
@@ -395,7 +395,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		zip_f		z(ar_next_path.c_str(), false);
 		auto fn_on_elem = [&z](const std::string& f, const struct stat64& s) -> void {
 			if(S_ISREG(s.st_mode)) {
-				z.add_new_file(f);
+				z.add_file_new(f);
 				LOG_INFO << "File '" << f << "' has been added as new (NEW)";
 			} else if (S_ISDIR(s.st_mode)) {
 				z.add_directory(f);
@@ -438,7 +438,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			const auto	it_latest = latest_fileset.find(f.first);
 			if(it_latest == latest_fileset.end()) {
 				// brand new file
-				z_next.add_new_file(f.first);
+				z_next.add_file_new(f.first);
 				LOG_INFO << "File '" << f.first << "' has been added as new (NEW)";
 			} else if((f.second.fs_mtime != it_latest->second.fs_mtime) ||
 				  (f.second.fs_size != it_latest->second.fs_size)) {
@@ -459,14 +459,14 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				if(bsdiff(p_data.data(), p_data.size(), n_data.data(), n_data.size(), &bsd_s))
 					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
 				// and finally add it
-				z_next.add_bsdiff(f.first, s_diff.str(), z_latest_name.c_str());
+				z_next.add_file_bsdiff(f.first, s_diff.str(), z_latest_name.c_str());
 				LOG_INFO << "File '" << f.first << "' has been added as changed (MOD) -> " << z_latest_name;
 			} else {
 				// unchanged file
 				// optimization - if the file is unchanged in z_latest as well,
 				// then use its prev!
 				const char *prev_unc = (FS_TYPE_FILE_UNC == it_latest->second.fs_type) ? it_latest->second.fs_prev : z_latest_name.c_str();
-				z_next.add_unchanged(f.first, prev_unc);
+				z_next.add_file_unchanged(f.first, prev_unc);
 				LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
 			}
 		}
