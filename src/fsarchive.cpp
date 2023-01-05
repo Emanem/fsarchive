@@ -186,7 +186,7 @@ namespace {
 		zip_f(const zip_f&);
 		zip_f& operator=(const zip_f&);
 
-		bool add_data(zip_source_t *p_zf, const std::string& f, const char *prev, const uint32_t type) {
+		bool add_data(zip_source_t *p_zf, const std::string& f, const fsarc_stat64_t& fs, const char *prev, const uint32_t type) {
 			if(f_map_.find(f) != f_map_.end()) {
 				LOG_WARNING << "Couldn't add file '" << f << "' to archive " << z_ << "; already existing";
 				return false;
@@ -199,10 +199,14 @@ namespace {
 			// https://libzip.org/documentation/zip_file_extra_field_set.html
 			// we can't use the info libzip stamps because the mtime is off
 			// by one usecond, plus we need to store additional metadata
-			struct stat64 s = {0};
-			if(lstat64(f.c_str(), &s))
-				throw fsarchive::rt_error("Invalid/unable to lstat64 file: ") << f;
-			const auto fs_t = fsarc_stat64_from_stat64(s, prev, type);
+			fsarc_stat64_t fs_t = fs;
+			if(prev) {
+				strncpy(fs_t.fs_prev, prev, 31);
+				fs_t.fs_prev[31] = '\0';
+			} else {
+				fs_t.fs_prev[0] = '\0';
+			}
+			fs_t.fs_type = type;
 			if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
 			f_map_[f] = fs_t;
@@ -230,17 +234,17 @@ namespace {
 					throw fsarchive::rt_error("Couldn't find FS_ZIP_EXTRA_FIELD_ID for file ") << st.name;
 				}
 			}
-			LOG_INFO << "Opened zip '" <<  fname << "' with " << f_map_.size() << " entries, id " << z_;
+			LOG_INFO << "Opened zip '" <<  fname << "' with " << f_map_.size() << " entries, id " << z_ << ((ro) ? " (RO)" : " (RW)");
 		}
 
-		bool add_file_new(const std::string& f) {
+		bool add_file_new(const std::string& f, const fsarc_stat64_t& fs) {
 			zip_source_t	*p_zf = zip_source_file_create(f.c_str(), 0, -1, 0);
 			if(!p_zf)
 				throw fsarchive::rt_error("Can't open source file for zip ") << f;
-			return add_data(p_zf, f, 0, FS_TYPE_FILE_NEW);
+			return add_data(p_zf, f, fs, 0, FS_TYPE_FILE_NEW);
 		}
 
-		bool add_file_bsdiff(const std::string& f, const std::string& diff, const char* prev) {
+		bool add_file_bsdiff(const std::string& f, const fsarc_stat64_t& fs, const std::string& diff, const char* prev) {
 			// in short, we have to duplicate the buffer...
 			// https://stackoverflow.com/questions/73820283/add-multiple-files-from-buffers-to-zip-archive-using-libzip
 			// https://stackoverflow.com/questions/73721970/how-to-construct-a-zip-file-with-libzip
@@ -255,27 +259,26 @@ namespace {
 				free(dup_diff);
 				throw fsarchive::rt_error("Can't create buffer for diff file for zip ") << f;
 			}
-			return add_data(p_zf, f, prev, FS_TYPE_FILE_MOD);
+			return add_data(p_zf, f, fs, prev, FS_TYPE_FILE_MOD);
 		}
 
-		bool add_file_unchanged(const std::string& f, const char* prev) {
+		bool add_file_unchanged(const std::string& f, const fsarc_stat64_t& fs, const char* prev) {
 			zip_source_t	*p_zf = zip_source_buffer(z_, (const void*)&NO_DATA, 0, 0);
 			if(!p_zf)
 				throw fsarchive::rt_error("Can't create buffer for unchanged file for zip ") << f;
-			return add_data(p_zf, f, prev, FS_TYPE_FILE_UNC);
+			return add_data(p_zf, f, fs, prev, FS_TYPE_FILE_UNC);
 		}
 
-		bool add_directory(const std::string& d) {
+		bool add_directory(const std::string& d, const fsarc_stat64_t& fs) {
 			const auto d_idx = zip_dir_add(z_, d.c_str(), ZIP_FL_ENC_GUESS);
 			if(-1 == d_idx)
 				throw fsarchive::rt_error("Can't add directory ") << d << " to archive";
 			struct stat64 s = {0};
 			if(lstat64(d.c_str(), &s))
 				throw fsarchive::rt_error("Invalid/unable to lstat64 directory: ") << d;
-			const auto fs_t = fsarc_stat64_from_stat64(s);
-			if(zip_file_extra_field_set(z_, d_idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
+			if(zip_file_extra_field_set(z_, d_idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs, sizeof(fs), ZIP_FL_LOCAL))
 				throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for directory ") << d;
-			f_map_[d] = fs_t;
+			f_map_[d] = fs;
 			LOG_SPAM << "Directory '" << d << "' added to archive " << z_;
 			return true;
 		}
@@ -396,10 +399,10 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		zip_f		z(ar_next_path.c_str(), false);
 		auto fn_on_elem = [&z](const std::string& f, const struct stat64& s) -> void {
 			if(S_ISREG(s.st_mode)) {
-				z.add_file_new(f);
+				z.add_file_new(f, fsarc_stat64_from_stat64(s));
 				LOG_INFO << "File '" << f << "' has been added as new (NEW)";
 			} else if (S_ISDIR(s.st_mode)) {
-				z.add_directory(f);
+				z.add_directory(f, fsarc_stat64_from_stat64(s));
 				LOG_INFO << "Directory '" << f << "' has been added";
 			}
 		};
@@ -431,7 +434,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		for(const auto& f : all_files) {
 			// if f is a directory, just add it to the new archive
 			if(S_ISDIR(f.second.fs_mode)) {
-				z_next.add_directory(f.first);
+				z_next.add_directory(f.first, f.second);
 				LOG_INFO << "Directory '" << f.first << "' has been added";
 				continue;
 			}
@@ -439,7 +442,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			const auto	it_latest = latest_fileset.find(f.first);
 			if(it_latest == latest_fileset.end()) {
 				// brand new file
-				z_next.add_file_new(f.first);
+				z_next.add_file_new(f.first, f.second);
 				LOG_INFO << "File '" << f.first << "' has been added as new (NEW)";
 			} else if((f.second.fs_mtime != it_latest->second.fs_mtime) ||
 				  (f.second.fs_size != it_latest->second.fs_size)) {
@@ -460,14 +463,14 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				if(bsdiff(p_data.data(), p_data.size(), n_data.data(), n_data.size(), &bsd_s))
 					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
 				// and finally add it
-				z_next.add_file_bsdiff(f.first, s_diff.str(), z_latest_name.c_str());
+				z_next.add_file_bsdiff(f.first, f.second, s_diff.str(), z_latest_name.c_str());
 				LOG_INFO << "File '" << f.first << "' has been added as changed (MOD) -> " << z_latest_name;
 			} else {
 				// unchanged file
 				// optimization - if the file is unchanged in z_latest as well,
 				// then use its prev!
 				const char *prev_unc = (FS_TYPE_FILE_UNC == it_latest->second.fs_type) ? it_latest->second.fs_prev : z_latest_name.c_str();
-				z_next.add_file_unchanged(f.first, prev_unc);
+				z_next.add_file_unchanged(f.first, f.second, prev_unc);
 				LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
 			}
 		}
