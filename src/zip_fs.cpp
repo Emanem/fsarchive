@@ -23,6 +23,13 @@
 #include <string.h>
 #include <memory>
 
+namespace {
+	extern "C" void progress_cb(zip_t *arc, double p, void* usr_ptr) {
+		fsarchive::log::progress	*l_p = (fsarchive::log::progress*)usr_ptr;
+		l_p->update_completion(p);
+	}
+}
+
 bool fsarchive::zip_fs::add_data(zip_source_t *p_zf, const std::string& f, const fsarchive::stat64_t& fs, const char *prev, const uint32_t type) {
 	if(f_map_.find(f) != f_map_.end()) {
 		LOG_WARNING << "Couldn't add file '" << f << "' to archive " << z_ << "; already existing";
@@ -147,6 +154,8 @@ const fsarchive::fileset_t& fsarchive::zip_fs::get_fileset(void) const {
 }
 
 fsarchive::zip_fs::~zip_fs() {
+	fsarchive::log::progress	p("Archiving zip file");
+	zip_register_progress_callback_with_state(z_, 0.0001, progress_cb, 0, &p);
 	zip_close(z_);
 	LOG_SPAM << "Closed zip, id " << z_;
 }

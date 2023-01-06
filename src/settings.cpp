@@ -29,9 +29,10 @@ namespace {
 	void print_help(const char *prog, const char *version) {
 		using namespace fsarchive::settings;
 
-		std::cerr <<	"Usage: " << prog << " [options]\nExecutes fsarchive " << version << "\n\n"
-				"-a, --archive (dir)     Archives all input files and directories inside (dir)/fsarchive_<timestamp>.zip\n"
-				"                        and/or updates existing archives generating a new (dir)/fsarchive_<timestamp>.zip\n"
+		std::cerr <<	"Usage: " << prog << " [options] dir1 dir2 ... \nExecutes fsarchive " << version << "\n\n"
+				"-a, --archive (dir)     Archives all input files (dir1, dir2, ...) and directories inside\n"
+				"                        (dir)/fsarchive_<timestamp>.zip and/or updates existing archives generating a new\n"
+			        "                        (dir)/fsarchive_<timestamp>.zip\n"
 				"-r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so\n"
 				"                        Specify -d to allow another directory to be the target destination for the restore\n"
 				"-d, --restore-dir (dir) Set the restore directory to this location\n"

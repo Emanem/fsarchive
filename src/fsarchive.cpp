@@ -256,8 +256,11 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		// * mod(ified) files
 		// * unc(changed) files
 		// and we should manage accordingly
-		const auto&	latest_fileset = z_latest.get_fileset();
+		fsarchive::log::progress	p_delta("Delta zip creation");
+		size_t				p_num = 0;
+		const auto&			latest_fileset = z_latest.get_fileset();
 		for(const auto& f : all_files) {
+			p_delta.update_completion(1.0*(p_num++)/all_files.size());
 			// if f is a directory, just add it to the new archive
 			if(S_ISDIR(f.second.fs_mode)) {
 				z_next.add_directory(f.first, f.second);
@@ -300,6 +303,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
 			}
 		}
+		p_delta.update_completion(1.0);
 	}
 }
 
@@ -312,9 +316,25 @@ void fsarchive::restore_archive(void) {
 
 	zip_fs	z(settings::RE_FILE, true);
 
+	fsarchive::log::progress	p_restore("Restoring zip data");
+	size_t				p_num = 0;
 	const auto&	re_fs = z.get_fileset();
+	auto fn_out_file = [](const std::string& f) -> std::string {
+		if(f[0] == '/') {
+			if(!settings::RE_DIR.empty())
+				return combine_paths(settings::RE_DIR, &f[1]);
+			else
+				return f;
+		} else {
+			if(!settings::RE_DIR.empty())
+				return combine_paths(settings::RE_DIR, f);
+			else
+				return f;
+		}
+	};
 	for(const auto& f : re_fs) {
-		const std::string	out_file = (f.first[0] != '/' && !settings::RE_DIR.empty()) ? combine_paths(settings::RE_DIR + '/', f.first) : f.first;
+		p_restore.update_completion(1.0*(p_num++)/re_fs.size());
+		const std::string	out_file = fn_out_file(f.first);
 		// if the current file is a directory, add it and carry on
 		if(S_ISDIR(f.second.fs_mode)) {
 			init_paths(out_file);
@@ -332,7 +352,7 @@ void fsarchive::restore_archive(void) {
 	}
 	// then change all permissions/ownership/etc etc
 	for(const auto& f : re_fs) {
-		const std::string	out_file = (f.first[0] != '/' && !settings::RE_DIR.empty()) ? combine_paths(settings::RE_DIR + '/', f.first) : f.first;
+		const std::string	out_file = fn_out_file(f.first);
 		if(chmod(out_file.c_str(), 07777 & f.second.fs_mode))
 			LOG_WARNING << "Can't set permissions for file/directory " << out_file;
 		// the below cast should work because the structure is aligned
@@ -342,5 +362,6 @@ void fsarchive::restore_archive(void) {
 		if(chown(out_file.c_str(), f.second.fs_uid, f.second.fs_gid))
 			LOG_WARNING << "Can't set user/group id for file/directory " << out_file;
 	}
+	p_restore.update_completion(1.0);
 }
 

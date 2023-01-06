@@ -19,6 +19,7 @@
 
 #include <sstream>
 #include <chrono>
+#include <string>
 
 namespace fsarchive {
 	namespace log {
@@ -62,7 +63,25 @@ namespace fsarchive {
 
 			~message();
 		};
-		
+
+		class progress {
+			const std::string	label_;
+			double			completion_;
+
+			progress();
+			progress(const progress&);
+			progress& operator=(const progress&);
+		public:
+			progress(const std::string& label);
+
+			void update_completion(const double c);
+
+			const std::string& get_label(void) const;
+
+			const double get_completion(void) const;
+
+			~progress();
+		};
 	}
 }
 
