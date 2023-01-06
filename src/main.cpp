@@ -21,6 +21,7 @@
 #include "settings.h"
 #include "fsarchive.h"
 #include "log.h"
+#include "utils.h"
 
 namespace {
 	const char*	__version__ = "0.1";
@@ -29,15 +30,15 @@ namespace {
 int main(int argc, char *argv[]) {
 	try {
 		const int args_idx = fsarchive::parse_args(argc, argv, argv[0], __version__);
-		if (fsarchive::settings::AR_ADD) {
-			fsarchive::init_update_archive(argv + args_idx, argc - args_idx);
-		} else {
-			// in case the name of RE_FILE contains a '/'
-			// set the same for AR_DIR
-			const auto	it_l_slash = fsarchive::settings::RE_FILE.find_last_of('/');
-			if(it_l_slash != std::string::npos)
-				fsarchive::settings::AR_DIR = fsarchive::settings::RE_FILE.substr(0, it_l_slash+1);
-			fsarchive::restore_archive();
+		switch(fsarchive::settings::AR_ACTION) {
+			case fsarchive::settings::ACTION::A_ARCHIVE:
+				fsarchive::init_update_archive(argv + args_idx, argc - args_idx);
+				break;
+			case fsarchive::settings::ACTION::A_RESTORE:
+				fsarchive::restore_archive();
+				break;
+			default:
+				throw fsarchive::rt_error("Invalid action ") << fsarchive::settings::AR_ACTION << " need to specify -a or -r";
 		}
 	} catch(const std::exception& e) {
 		LOG_ERROR << "Exception: " << e.what();

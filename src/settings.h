@@ -25,10 +25,17 @@
 
 namespace fsarchive { 
 	namespace settings {
-		extern bool		AR_ADD;
+		enum ACTION {
+			A_ARCHIVE = 1,
+			A_RESTORE = 2,
+			A_NONE = -1
+		};
+
+		extern int		AR_ACTION;
 		extern std::string	AR_DIR;
 		extern std::string	RE_FILE;
 		extern std::string	RE_DIR;
+		extern int		AR_COMP_LEVEL;
 	}
 
 	int parse_args(int argc, char *argv[], const char *prog, const char *version);

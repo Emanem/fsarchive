@@ -20,8 +20,28 @@
 #include "log.h"
 #include "utils.h"
 #include <iostream>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <signal.h>
 
 namespace {
+	struct winsize term_size = {0};
+
+	void sig_term_resize(int s) {
+		ioctl(STDOUT_FILENO, TIOCGWINSZ, &term_size);
+	}
+
+	bool init_term(void) {
+		if(!isatty(STDOUT_FILENO))
+			return false;
+
+		signal(SIGWINCH, sig_term_resize);
+		ioctl(STDOUT_FILENO, TIOCGWINSZ, &term_size);
+		return true;
+	}
+
+	const bool is_term = init_term();
+
 	void get_header(const std::chrono::time_point<std::chrono::high_resolution_clock>& tp, char out[32]) {
 		using namespace std::chrono;
 		const auto	tp_tm = time_point_cast<system_clock::duration>(tp);
@@ -36,6 +56,12 @@ namespace {
 	fsarchive::log::progress	*cur_prg = 0;
 
 	void do_print(const std::string& log_line, const bool progress_only) {
+		if(!is_term) {
+			if(!progress_only)
+				printf("%s\n", log_line.c_str());
+			return;
+		}
+
 		if(!progress_only) {
 			printf("\r%s\n", log_line.c_str());
 		}

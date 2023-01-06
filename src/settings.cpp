@@ -35,7 +35,9 @@ namespace {
 			        "                        (dir)/fsarchive_<timestamp>.zip\n"
 				"-r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so\n"
 				"                        Specify -d to allow another directory to be the target destination for the restore\n"
-				"-d, --restore-dir (dir) Set the restore directory to this location\n"
+				"-d, --restore-dir (dir) Sets the restore directory to this location\n"
+				"    --comp-level (l)    Sets the compression level to (l) (from 1 to 9) where 1 is fastest and 9 is best.\n"
+				"                        0 is default\n"
 				"    --help              Prints this help and exit\n\n"
 		<< std::flush;
 	}
@@ -43,10 +45,11 @@ namespace {
 
 namespace fsarchive { 
 	namespace settings {
-		bool		AR_ADD = true;
+		int		AR_ACTION = A_NONE;
 		std::string	AR_DIR = "";
 		std::string	RE_FILE = "";
 		std::string	RE_DIR = "";
+		int		AR_COMP_LEVEL = 0;
 	}
 }
 
@@ -59,6 +62,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"archive",	required_argument, 0,	'a'},
 		{"restore",	required_argument, 0,	'r'},
 		{"restore-dir",	required_argument, 0,	'd'},
+		{"comp-level",	required_argument, 0,	0},
 		{0, 0, 0, 0}
 	};
 	
@@ -66,7 +70,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
         	// getopt_long stores the option index here
         	int		option_index = 0;
 
-		if(-1 == (c = getopt_long(argc, argv, "ha:r:d:", long_options, &option_index)))
+		if(-1 == (c = getopt_long(argc, argv, "a:r:d:", long_options, &option_index)))
        			break;
 
 		switch (c) {
@@ -77,22 +81,34 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 			if(!std::strcmp("help", long_options[option_index].name)) {
 				print_help(prog, version);
 				std::exit(0);
+			} else if(!std::strcmp("comp-level", long_options[option_index].name)) {
+				AR_COMP_LEVEL = std::atoi(optarg);
+				if(AR_COMP_LEVEL < 0 || AR_COMP_LEVEL > 9)
+					AR_COMP_LEVEL = 0;
 			}
 		} break;
 
 		case 'a': {
 			AR_DIR = optarg;
-			AR_ADD = true;
+			if(AR_ACTION != A_NONE)
+				throw fsarchive::rt_error("Seems that option -r has been specified with -a, this is invalid");
+			AR_ACTION = A_ARCHIVE;
 		} break;
 
 		case 'r': {
 			RE_FILE = optarg;
-			AR_ADD = false;
+			if(AR_ACTION != A_NONE)
+				throw fsarchive::rt_error("Seems that option -a has been specified with -r, this is invalid");
+			AR_ACTION = A_RESTORE;
+			// in case the name of RE_FILE contains a '/'
+			// set the same for AR_DIR
+			const auto	it_l_slash = fsarchive::settings::RE_FILE.find_last_of('/');
+			if(it_l_slash != std::string::npos)
+				fsarchive::settings::AR_DIR = fsarchive::settings::RE_FILE.substr(0, it_l_slash+1);
 		} break;
 
 		case 'd': {
 			RE_DIR = optarg;
-			AR_ADD = false;
 		} break;
 
 		case '?':

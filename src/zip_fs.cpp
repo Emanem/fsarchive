@@ -20,6 +20,7 @@
 #include "zip_fs.h"
 #include "log.h"
 #include "utils.h"
+#include "settings.h"
 #include <string.h>
 #include <memory>
 
@@ -40,6 +41,8 @@ bool fsarchive::zip_fs::add_data(zip_source_t *p_zf, const std::string& f, const
 		zip_source_free(p_zf);
 		throw fsarchive::rt_error("Can't add file/data ") << f << " (type " << type << ") to the archive";
 	}
+	if(zip_set_file_compression(z_, idx, ZIP_CM_DEFLATE, (zip_uint32_t)settings::AR_COMP_LEVEL))
+		throw fsarchive::rt_error("Can't set compression level for file/data ") << f << " (type " << type << ") to the archive";
 	// https://libzip.org/documentation/zip_file_extra_field_set.html
 	// we can't use the info libzip stamps because the mtime is off
 	// by one usecond, plus we need to store additional metadata
