@@ -27,10 +27,11 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <utime.h>
+#include <string.h>
 #include <memory>
 #include <sstream>
 #include <fstream>
-#include <string.h>
+#include <regex>
 
 extern "C" {
 #include "bsdiff.h"
@@ -51,6 +52,8 @@ namespace {
 		bspatch_s(const buffer_t& d) : idx(0), data(d) {
 		}
 	};
+
+	typedef std::vector<std::regex>				regexvec_t;
 
 	extern "C" {
 		int fsarc_bspatch_read(const struct bspatch_stream* stream, void* buffer, int length) {
@@ -147,7 +150,16 @@ namespace {
 	}
 
 	template<typename fn_on_elem>
-	void r_fs_scan(const std::string& f, fn_on_elem&& on_elem) {
+	void r_fs_scan(const std::string& f, fn_on_elem&& on_elem, const regexvec_t& excls) {
+		// first check we are not a match anywhere in our
+		// exclusions regex
+		for(const auto& r : excls) {
+			std::smatch	s;
+			if(std::regex_match(f, s, r)) {
+				LOG_INFO << "File " << f << " is excluded";
+				return;
+			}
+		}
 		struct stat64 s = {0};
 		if(lstat64(f.c_str(), &s))
 			throw fsarchive::rt_error("Invalid/unable to lstat64 file/directory: ") << f;
@@ -164,7 +176,7 @@ namespace {
 				   std::string("..") == de->d_name)
 					continue;
 				if(DT_REG == de->d_type || DT_DIR == de->d_type)
-					r_fs_scan(combine_paths(f, de->d_name), on_elem);
+					r_fs_scan(combine_paths(f, de->d_name), on_elem, excls);
 			}
 		}
 	}
@@ -210,11 +222,35 @@ namespace {
 		}
 		throw fsarchive::rt_error("Invalid metadata fs_type ") << s.fs_type;
 	}
+
+	regexvec_t init_regex(const fsarchive::settings::excllist_t& f) {
+		// used to sanitize input
+		const static std::regex	special_chars { R"([-[\]{}()*+?.,\^$|#\s])" };
+		regexvec_t	rv;
+		for(const auto& r : f) {
+			std::stringstream	cur_regex;
+			// find all occurences of '*'
+			const char	*p_cur = r.c_str(),
+			      		*p_next_star = 0;
+			while((p_next_star = strchr(p_cur, '*'))) {
+				cur_regex << std::regex_replace(std::string(p_cur, p_next_star), special_chars, R"(\$&)");
+				cur_regex << ".*";
+				p_cur = p_next_star+1;
+			}
+			cur_regex << std::regex_replace(std::string(p_cur), special_chars, R"(\$&)");
+			//
+			rv.push_back(std::regex(cur_regex.str()));
+		}
+
+		return rv;
+	}
 }
 
 void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	using namespace fsarchive;
 
+	// init exclusions regex
+	const regexvec_t	v_excl = init_regex(settings::AR_EXCLUSIONS);
 	// let's check that we have a valid directory
 	std::string	ar_next_path;
 	filelist_t	ar_files;
@@ -234,7 +270,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			}
 		};
 		for(int i=0; i < n; ++i)
-			r_fs_scan(in_dirs[i], fn_on_elem);
+			r_fs_scan(in_dirs[i], fn_on_elem, v_excl);
 	} else {
 		// otherwise load the latest archive
 		LOG_INFO << "Building a delta archive: " << *ar_files.rbegin() << " -> " << ar_next_path;
@@ -250,7 +286,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 					all_files[f] = fsarc_stat64_from_stat64(s);
 			};
 			for(int i=0; i < n; ++i)
-				r_fs_scan(in_dirs[i], fn_fileadd);
+				r_fs_scan(in_dirs[i], fn_fileadd, v_excl);
 		}
 		// then we should have 3 logical 'sets'
 		// * new files

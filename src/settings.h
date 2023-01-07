@@ -22,6 +22,7 @@
 
 #include <cstdlib>
 #include <string>
+#include <set>
 
 namespace fsarchive { 
 	namespace settings {
@@ -31,12 +32,15 @@ namespace fsarchive {
 			A_NONE = -1
 		};
 
+		typedef std::set<std::string>	excllist_t;
+
 		extern int		AR_ACTION;
 		extern std::string	AR_DIR;
 		extern std::string	RE_FILE;
 		extern std::string	RE_DIR;
 		extern int		AR_COMP_LEVEL;
 		extern bool		AR_FORCE_NEW;
+		extern excllist_t	AR_EXCLUSIONS;
 	}
 
 	int parse_args(int argc, char *argv[], const char *prog, const char *version);

@@ -40,6 +40,11 @@ namespace {
 				"                        0 is default\n"
 				"    --force-new-arc     Flag to force the creation of a new archive (-a option) even if a previous already\n"
 				"                        exists (i.e. no delta archive would be created)\n"
+				"-x, --exclude (str)     Excludes from archiving all the files/directories which match (str); if you want\n"
+				"                        to have a 'contain' search, do specify the \"*(str)*\" pattern (i.e. -x \"*abc*\"\n"
+				"                        will exclude all the files/dirs which contain the sequence 'abc').\n"
+				"                        Please note that the only wildcard supported is *, everything else will be interpreted\n"
+				"                        as a literal character; you can specify multiple exclusions (i.e. -x ex1 -x ex2 ... )\n"
 				"    --help              Prints this help and exit\n\n"
 		<< std::flush;
 	}
@@ -53,6 +58,7 @@ namespace fsarchive {
 		std::string	RE_DIR = "";
 		int		AR_COMP_LEVEL = 0;
 		bool		AR_FORCE_NEW = false;
+		excllist_t	AR_EXCLUSIONS;
 	}
 }
 
@@ -67,6 +73,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"restore-dir",	required_argument, 0,	'd'},
 		{"comp-level",	required_argument, 0,	0},
 		{"force-new-arc",no_argument,	   0,	0},
+		{"exclude",	required_argument, 0,	'x'},
 		{0, 0, 0, 0}
 	};
 	
@@ -74,7 +81,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
         	// getopt_long stores the option index here
         	int		option_index = 0;
 
-		if(-1 == (c = getopt_long(argc, argv, "a:r:d:", long_options, &option_index)))
+		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:", long_options, &option_index)))
        			break;
 
 		switch (c) {
@@ -115,6 +122,10 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 
 		case 'd': {
 			RE_DIR = optarg;
+		} break;
+
+		case 'x': {
+			AR_EXCLUSIONS.insert(optarg);
 		} break;
 
 		case '?':
