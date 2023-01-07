@@ -45,6 +45,9 @@ namespace {
 				"                        will exclude all the files/dirs which contain the sequence 'abc').\n"
 				"                        Please note that the only wildcard supported is *, everything else will be interpreted\n"
 				"                        as a literal character; you can specify multiple exclusions (i.e. -x ex1 -x ex2 ... )\n"
+				"    --size-filter (sz)  Set a maximum file size filter of size (sz); has to be a positive value (bytes) and\n"
+				"                        can have suffixes such as k, m and g to respectively interpret as KiB, MiB and GiB\n"
+				"                        By default this is disabled\n"
 				"    --help              Prints this help and exit\n\n"
 		<< std::flush;
 	}
@@ -59,6 +62,7 @@ namespace fsarchive {
 		int		AR_COMP_LEVEL = 0;
 		bool		AR_FORCE_NEW = false;
 		excllist_t	AR_EXCLUSIONS;
+		int64_t		AR_SZ_FILTER = -1;
 	}
 }
 
@@ -74,6 +78,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"comp-level",	required_argument, 0,	0},
 		{"force-new-arc",no_argument,	   0,	0},
 		{"exclude",	required_argument, 0,	'x'},
+		{"size-filter",	required_argument, 0,	0},
 		{0, 0, 0, 0}
 	};
 	
@@ -98,20 +103,41 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 					AR_COMP_LEVEL = 0;
 			} else if(!std::strcmp("force-new-arc", long_options[option_index].name)) {
 				AR_FORCE_NEW = true;
+			} else if(!std::strcmp("size-filter", long_options[option_index].name)) {
+				char	*ptrend = 0;
+				AR_SZ_FILTER = strtol(optarg, &ptrend, 10);
+				if(*ptrend) {
+					const char	unit = tolower(*ptrend);
+					switch(unit) {
+						case 'g':
+							AR_SZ_FILTER *= 1024;
+						case 'm':
+							AR_SZ_FILTER *= 1024;
+						case 'k':
+							AR_SZ_FILTER *= 1024;
+							break;
+						default:
+							// fall through and throw exception
+							AR_SZ_FILTER = -1;
+							break;
+					}
+				}
+				if(AR_SZ_FILTER <= 0)
+					throw fsarchive::rt_error("Invalid size filter provided: ") << optarg;
 			}
 		} break;
 
 		case 'a': {
 			AR_DIR = optarg;
 			if(AR_ACTION != A_NONE)
-				throw fsarchive::rt_error("Seems that option -r has been specified with -a, this is invalid");
+				throw fsarchive::rt_error("Invalid combination of -a and -r options");
 			AR_ACTION = A_ARCHIVE;
 		} break;
 
 		case 'r': {
 			RE_FILE = optarg;
 			if(AR_ACTION != A_NONE)
-				throw fsarchive::rt_error("Seems that option -a has been specified with -r, this is invalid");
+				throw fsarchive::rt_error("Invalid combination of -a and -r options");
 			AR_ACTION = A_RESTORE;
 			// in case the name of RE_FILE contains a '/'
 			// set the same for AR_DIR

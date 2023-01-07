@@ -61,6 +61,11 @@ namespace {
 
 	typedef std::unique_ptr<log::progress>			pprogress_t;
 
+	typedef struct {
+		regexvec_t	r_excl;
+		int64_t		sz_excl;
+	} excl_t;
+
 	extern "C" {
 		int fsarc_bspatch_read(const struct bspatch_stream* stream, void* buffer, int length) {
 			bspatch_s*	bs_s = (bspatch_s*)stream->opaque;
@@ -156,10 +161,10 @@ namespace {
 	}
 
 	template<typename fn_on_elem>
-	void r_fs_scan(const std::string& f, fn_on_elem&& on_elem, const regexvec_t& excls) {
+	void r_fs_scan(const std::string& f, fn_on_elem&& on_elem, const excl_t& excls) {
 		// first check we are not a match anywhere in our
 		// exclusions regex
-		for(const auto& r : excls) {
+		for(const auto& r : excls.r_excl) {
 			std::smatch	s;
 			if(std::regex_match(f, s, r)) {
 				LOG_INFO << "File " << f << " is excluded";
@@ -169,6 +174,11 @@ namespace {
 		struct stat64 s = {0};
 		if(lstat64(f.c_str(), &s))
 			throw fsarchive::rt_error("Invalid/unable to lstat64 file/directory: ") << f;
+		// exclusions for size
+		if((excls.sz_excl > 0) && (s.st_size > excls.sz_excl)) {
+			LOG_INFO << "File " << f << " is size excluded";
+			return;
+		}
 		if(!S_ISDIR(s.st_mode)) {
 			if(S_ISREG(s.st_mode)) {
 				on_elem(f, s);
@@ -266,7 +276,10 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	using namespace fsarchive;
 
 	// init exclusions regex
-	const regexvec_t	v_excl = init_regex(settings::AR_EXCLUSIONS);
+	excl_t	excl = {
+		.r_excl = init_regex(settings::AR_EXCLUSIONS),
+		.sz_excl = settings::AR_SZ_FILTER,
+	};
 	// let's check that we have a valid directory
 	std::string	ar_next_path;
 	filelist_t	ar_files;
@@ -286,7 +299,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			}
 		};
 		for(int i=0; i < n; ++i)
-			r_fs_scan(in_dirs[i], fn_on_elem, v_excl);
+			r_fs_scan(in_dirs[i], fn_on_elem, excl);
 	} else {
 		// otherwise load the latest archive
 		LOG_INFO << "Building a delta archive: " << *ar_files.rbegin() << " -> " << ar_next_path;
@@ -302,7 +315,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 					all_files[f] = fsarc_stat64_from_stat64(s);
 			};
 			for(int i=0; i < n; ++i)
-				r_fs_scan(in_dirs[i], fn_fileadd, v_excl);
+				r_fs_scan(in_dirs[i], fn_fileadd, excl);
 		}
 		// then we should have 3 logical 'sets'
 		// * new files

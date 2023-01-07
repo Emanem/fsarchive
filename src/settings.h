@@ -41,6 +41,7 @@ namespace fsarchive {
 		extern int		AR_COMP_LEVEL;
 		extern bool		AR_FORCE_NEW;
 		extern excllist_t	AR_EXCLUSIONS;
+		extern int64_t		AR_SZ_FILTER;
 	}
 
 	int parse_args(int argc, char *argv[], const char *prog, const char *version);
