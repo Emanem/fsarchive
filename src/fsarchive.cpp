@@ -420,6 +420,8 @@ void fsarchive::restore_archive(void) {
 	}
 	p_restore->update_completion(1.0);
 	p_restore.reset();
+	if(!settings::RE_METADATA)
+		return;
 	p_restore = std::make_unique<log::progress>("Restoring metadata");
 	p_num = 0;
 	// then change all permissions/ownership/etc etc

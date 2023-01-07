@@ -48,6 +48,7 @@ namespace {
 				"    --size-filter (sz)  Set a maximum file size filter of size (sz); has to be a positive value (bytes) and\n"
 				"                        can have suffixes such as k, m and g to respectively interpret as KiB, MiB and GiB\n"
 				"                        By default this is disabled\n"
+				"    --no-metadata       Do not restore metadata (file/dir ownership, permission and times)\n"
 				"    --help              Prints this help and exit\n\n"
 		<< std::flush;
 	}
@@ -63,6 +64,7 @@ namespace fsarchive {
 		bool		AR_FORCE_NEW = false;
 		excllist_t	AR_EXCLUSIONS;
 		int64_t		AR_SZ_FILTER = -1;
+		bool		RE_METADATA = true;
 	}
 }
 
@@ -79,6 +81,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"force-new-arc",no_argument,	   0,	0},
 		{"exclude",	required_argument, 0,	'x'},
 		{"size-filter",	required_argument, 0,	0},
+		{"no-metadata",	no_argument,	   0,	0},
 		{0, 0, 0, 0}
 	};
 	
@@ -124,6 +127,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 				}
 				if(AR_SZ_FILTER <= 0)
 					throw fsarchive::rt_error("Invalid size filter provided: ") << optarg;
+			} else if(!std::strcmp("no-metadata", long_options[option_index].name)) {
+				RE_METADATA = false;
 			}
 		} break;
 
