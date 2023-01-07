@@ -55,6 +55,10 @@ namespace {
 
 	typedef std::vector<std::regex>				regexvec_t;
 
+	typedef std::unique_ptr<const zip_fs>			pzip_fs_t;
+
+	typedef std::unordered_map<std::string, pzip_fs_t>	zipfscache_t;
+
 	extern "C" {
 		int fsarc_bspatch_read(const struct bspatch_stream* stream, void* buffer, int length) {
 			bspatch_s*	bs_s = (bspatch_s*)stream->opaque;
@@ -181,8 +185,18 @@ namespace {
 		}
 	}
 
-	void r_rebuild_file(const zip_fs& c_fs, const std::string& f, buffer_t& data) {
+	void r_rebuild_file(const zip_fs& c_fs, const std::string& f, buffer_t& data, zipfscache_t& zcache) {
 		using namespace fsarchive;
+
+		auto fn_get_fromcache = [&zcache](const std::string& f) -> const zip_fs& {
+			const auto it_c = zcache.find(f);
+			if(zcache.end() != it_c)
+				return *it_c->second;
+			const auto rv = zcache.insert(zipfscache_t::value_type(f, std::make_unique<zip_fs>(f, true)));
+			if(!rv.second)
+				throw fsarchive::rt_error("Internal zip_fs cache corrupted, double entry for ") << f;
+			return *rv.first->second;
+		};
 
 		stat64_t	s = {0};
 		if(!c_fs.extract_file(f, data, s))
@@ -195,16 +209,16 @@ namespace {
 		} else if(FS_TYPE_FILE_UNC == s.fs_type) {
 			// if ile is unchanged, fetch it from the correct
 			// prev entry
-			const zip_fs	p_fs(combine_paths(settings::AR_DIR, s.fs_prev), true);
-			r_rebuild_file(p_fs, f, data);
+			const zip_fs&	p_fs = fn_get_fromcache(combine_paths(settings::AR_DIR, s.fs_prev));
+			r_rebuild_file(p_fs, f, data, zcache);
 			LOG_INFO << "File '" << f << "' has been forwarded as is (UNC) from " << s.fs_prev;
 			return;
 		} else if(FS_TYPE_FILE_MOD == s.fs_type) {
 			// if the file is modified, we first need to
 			// - get the original
 			buffer_t	p_data;
-			const zip_fs	p_fs(combine_paths(settings::AR_DIR, s.fs_prev), true);
-			r_rebuild_file(p_fs, f, p_data);
+			const zip_fs&	p_fs = fn_get_fromcache(combine_paths(settings::AR_DIR, s.fs_prev));
+			r_rebuild_file(p_fs, f, p_data, zcache);
 			// - apply current patch
 			// s will contain the full size of the patched file
 			buffer_t	n_data(s.fs_size);
@@ -296,6 +310,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		fsarchive::log::progress	p_delta("Delta zip creation");
 		size_t				p_num = 0;
 		const auto&			latest_fileset = z_latest.get_fileset();
+		zipfscache_t			zcache;
 		for(const auto& f : all_files) {
 			p_delta.update_completion(1.0*(p_num++)/all_files.size());
 			// if f is a directory, just add it to the new archive
@@ -315,7 +330,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				// changed file
 				// first rebuild the file
 				buffer_t	p_data;
-				r_rebuild_file(z_latest, f.first, p_data);
+				r_rebuild_file(z_latest, f.first, p_data, zcache);
 				// create a bsdiff patch
 				std::stringstream	s_diff;
 				bsdiff_stream_t	bsd_s = {
@@ -369,6 +384,7 @@ void fsarchive::restore_archive(void) {
 				return f;
 		}
 	};
+	zipfscache_t	zcache;
 	for(const auto& f : re_fs) {
 		p_restore.update_completion(1.0*(p_num++)/re_fs.size());
 		const std::string	out_file = fn_out_file(f.first);
@@ -382,7 +398,7 @@ void fsarchive::restore_archive(void) {
 		if(it_l_slash != std::string::npos)
 			init_paths(out_file.substr(0, it_l_slash+1));
 		buffer_t	buf_file;
-		r_rebuild_file(z, f.first, buf_file);
+		r_rebuild_file(z, f.first, buf_file, zcache);
 		std::ofstream	ostr(out_file, std::ios_base::binary);
 		if((long int)buf_file.size() != ostr.write((const char*)buf_file.data(), buf_file.size()).tellp())
 			throw fsarchive::rt_error("Can't restore file ") << f.first << " on the disk " << out_file;
