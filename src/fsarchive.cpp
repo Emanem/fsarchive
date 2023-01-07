@@ -59,6 +59,8 @@ namespace {
 
 	typedef std::unordered_map<std::string, pzip_fs_t>	zipfscache_t;
 
+	typedef std::unique_ptr<log::progress>			pprogress_t;
+
 	extern "C" {
 		int fsarc_bspatch_read(const struct bspatch_stream* stream, void* buffer, int length) {
 			bspatch_s*	bs_s = (bspatch_s*)stream->opaque;
@@ -368,8 +370,8 @@ void fsarchive::restore_archive(void) {
 
 	zip_fs	z(settings::RE_FILE, true);
 
-	fsarchive::log::progress	p_restore("Restoring zip data");
-	size_t				p_num = 0;
+	pprogress_t	p_restore(std::make_unique<log::progress>("Restoring zip data"));
+	size_t		p_num = 0;
 	const auto&	re_fs = z.get_fileset();
 	auto fn_out_file = [](const std::string& f) -> std::string {
 		if(f[0] == '/') {
@@ -386,7 +388,7 @@ void fsarchive::restore_archive(void) {
 	};
 	zipfscache_t	zcache;
 	for(const auto& f : re_fs) {
-		p_restore.update_completion(1.0*(p_num++)/re_fs.size());
+		p_restore->update_completion(1.0*(p_num++)/re_fs.size());
 		const std::string	out_file = fn_out_file(f.first);
 		// if the current file is a directory, add it and carry on
 		if(S_ISDIR(f.second.fs_mode)) {
@@ -403,8 +405,13 @@ void fsarchive::restore_archive(void) {
 		if((long int)buf_file.size() != ostr.write((const char*)buf_file.data(), buf_file.size()).tellp())
 			throw fsarchive::rt_error("Can't restore file ") << f.first << " on the disk " << out_file;
 	}
+	p_restore->update_completion(1.0);
+	p_restore.reset();
+	p_restore = std::make_unique<log::progress>("Restoring metadata");
+	p_num = 0;
 	// then change all permissions/ownership/etc etc
 	for(const auto& f : re_fs) {
+		p_restore->update_completion(1.0*(p_num++)/re_fs.size());
 		const std::string	out_file = fn_out_file(f.first);
 		if(chmod(out_file.c_str(), 07777 & f.second.fs_mode))
 			LOG_WARNING << "Can't set permissions for file/directory " << out_file;
@@ -415,6 +422,6 @@ void fsarchive::restore_archive(void) {
 		if(chown(out_file.c_str(), f.second.fs_uid, f.second.fs_gid))
 			LOG_WARNING << "Can't set user/group id for file/directory " << out_file;
 	}
-	p_restore.update_completion(1.0);
+	p_restore->update_completion(1.0);
 }
 
