@@ -32,12 +32,14 @@ namespace {
 		std::cerr <<	"Usage: " << prog << " [options] dir1 dir2 ... \nExecutes fsarchive " << version << "\n\n"
 				"-a, --archive (dir)     Archives all input files (dir1, dir2, ...) and directories inside\n"
 				"                        (dir)/fsarchive_<timestamp>.zip and/or updates existing archives generating a new\n"
-			        "                        (dir)/fsarchive_<timestamp>.zip\n"
+			        "                        and/or delta (dir)/fsarchive_<timestamp>.zip\n"
 				"-r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so\n"
 				"                        Specify -d to allow another directory to be the target destination for the restore\n"
 				"-d, --restore-dir (dir) Sets the restore directory to this location\n"
 				"    --comp-level (l)    Sets the compression level to (l) (from 1 to 9) where 1 is fastest and 9 is best.\n"
 				"                        0 is default\n"
+				"    --force-new-arc     Flag to force the creation of a new archive (-a option) even if a previous already\n"
+				"                        exists (i.e. no delta archive would be created)\n"
 				"    --help              Prints this help and exit\n\n"
 		<< std::flush;
 	}
@@ -50,6 +52,7 @@ namespace fsarchive {
 		std::string	RE_FILE = "";
 		std::string	RE_DIR = "";
 		int		AR_COMP_LEVEL = 0;
+		bool		AR_FORCE_NEW = false;
 	}
 }
 
@@ -63,6 +66,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"restore",	required_argument, 0,	'r'},
 		{"restore-dir",	required_argument, 0,	'd'},
 		{"comp-level",	required_argument, 0,	0},
+		{"force-new-arc",no_argument,	   0,	0},
 		{0, 0, 0, 0}
 	};
 	
@@ -85,6 +89,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 				AR_COMP_LEVEL = std::atoi(optarg);
 				if(AR_COMP_LEVEL < 0 || AR_COMP_LEVEL > 9)
 					AR_COMP_LEVEL = 0;
+			} else if(!std::strcmp("force-new-arc", long_options[option_index].name)) {
+				AR_FORCE_NEW = true;
 			}
 		} break;
 
@@ -112,6 +118,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		} break;
 
 		case '?':
+			return -1;
 		break;
 		
 		default:

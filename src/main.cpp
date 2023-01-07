@@ -24,12 +24,14 @@
 #include "utils.h"
 
 namespace {
-	const char*	__version__ = "0.1";
+	const char*	__version__ = "0.1.1";
 }
 
 int main(int argc, char *argv[]) {
 	try {
 		const int args_idx = fsarchive::parse_args(argc, argv, argv[0], __version__);
+		if(-1 == args_idx)
+			return 1;
 		switch(fsarchive::settings::AR_ACTION) {
 			case fsarchive::settings::ACTION::A_ARCHIVE:
 				fsarchive::init_update_archive(argv + args_idx, argc - args_idx);

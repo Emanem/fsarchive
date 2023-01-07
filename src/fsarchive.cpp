@@ -219,8 +219,9 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	std::string	ar_next_path;
 	filelist_t	ar_files;
 	check_dir_fsarchives(settings::AR_DIR, ar_next_path, ar_files);
-	// if we don't have any files, then write from scratch
-	if(ar_files.empty()) {
+	// if we don't have any files or the AR_FORCE_NEW is set
+	// then write from scratch
+	if(ar_files.empty() || settings::AR_FORCE_NEW) {
 		LOG_INFO << "Building an archive from scratch: " << ar_next_path;
 		zip_fs		z(ar_next_path.c_str(), false);
 		auto fn_on_elem = [&z](const std::string& f, const struct stat64& s) -> void {

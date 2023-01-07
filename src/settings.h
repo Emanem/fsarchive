@@ -36,6 +36,7 @@ namespace fsarchive {
 		extern std::string	RE_FILE;
 		extern std::string	RE_DIR;
 		extern int		AR_COMP_LEVEL;
+		extern bool		AR_FORCE_NEW;
 	}
 
 	int parse_args(int argc, char *argv[], const char *prog, const char *version);
