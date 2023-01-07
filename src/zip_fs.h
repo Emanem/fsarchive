@@ -60,6 +60,7 @@ namespace fsarchive {
 	class zip_fs {
 		static const char	NO_DATA;
 		zip_t			*z_;
+		const bool		ro_;
 		fileset_t		f_map_;
 
 		zip_fs();

@@ -63,7 +63,7 @@ bool fsarchive::zip_fs::add_data(zip_source_t *p_zf, const std::string& f, const
 	return true;
 }
 
-fsarchive::zip_fs::zip_fs(const std::string& fname, const bool ro) : z_(zip_open(fname.c_str(), (ro) ? ZIP_RDONLY : (ZIP_CREATE | ZIP_EXCL), 0)) {
+fsarchive::zip_fs::zip_fs(const std::string& fname, const bool ro) : z_(zip_open(fname.c_str(), (ro) ? ZIP_RDONLY : (ZIP_CREATE | ZIP_EXCL), 0)), ro_(ro) {
 	if(!z_)
 		throw fsarchive::rt_error("Can't open/create zip archive ") << fname;
 	// populate the entries
@@ -159,24 +159,33 @@ const fsarchive::fileset_t& fsarchive::zip_fs::get_fileset(void) const {
 }
 
 fsarchive::zip_fs::~zip_fs() {
-	fsarchive::log::progress	p("Archiving zip file");
-	zip_register_progress_callback_with_state(z_, 0.0001, progress_cb, 0, &p);
-	if(zip_close(z_)) {
-		zip_error_t* err = zip_get_error(z_);
-		LOG_ERROR << "Couldn't close/finish zip file " << z_ << " : " << zip_error_strerror(err);
-		zip_error_fini(err);
-		// let's try to find out which file was removed before it could be
-		// archived
-		for(const auto& f : f_map_) {
-			// just try to open in R/O mode
-			// if this fails, we won't be able to archive anyway
-			// hence we don't need to check many other conditions
-			const int t_fd = open(f.first.c_str(), O_RDONLY);
-			if(-1 == t_fd)
-				LOG_ERROR << "The file/directory '" << f.first << "' is not accessible anymore";
-			else
-				close(t_fd);
+	if(!ro_) {
+		// if we're not in R/O mode, then log the progress
+		// to archive
+		fsarchive::log::progress	p("Archiving zip file");
+		zip_register_progress_callback_with_state(z_, 0.0001, progress_cb, 0, &p);
+		if(zip_close(z_)) {
+			zip_error_t* err = zip_get_error(z_);
+			LOG_ERROR << "Couldn't close/finish zip file " << z_ << " : " << zip_error_strerror(err);
+			zip_error_fini(err);
+			// let's try to find out which file was removed before it could be
+			// archived
+			for(const auto& f : f_map_) {
+				// just try to open in R/O mode
+				// if this fails, we won't be able to archive anyway
+				// hence we don't need to check many other conditions
+				const int t_fd = open(f.first.c_str(), O_RDONLY);
+				if(-1 == t_fd)
+					LOG_ERROR << "The file/directory '" << f.first << "' is not accessible anymore";
+				else
+					close(t_fd);
+			}
+		} else {
+			// just a nice log completion
+			p.update_completion(1.0);
 		}
+	} else {
+		zip_close(z_);
 	}
 	LOG_SPAM << "Closed zip, id " << z_;
 }
