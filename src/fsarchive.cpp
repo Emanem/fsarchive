@@ -55,9 +55,11 @@ namespace {
 
 	typedef std::vector<std::regex>				regexvec_t;
 
-	typedef std::unique_ptr<const zip_fs>			pzip_fs_t;
+	typedef std::unique_ptr<zip_fs>				pzip_fs_t;
 
-	typedef std::unordered_map<std::string, pzip_fs_t>	zipfscache_t;
+	typedef std::unique_ptr<const zip_fs>			cpzip_fs_t;
+
+	typedef std::unordered_map<std::string, cpzip_fs_t>	zipfscache_t;
 
 	typedef std::unique_ptr<log::progress>			pprogress_t;
 
@@ -93,6 +95,9 @@ namespace {
 	}
 
 	void init_paths(const std::string& s, mode_t mode = 0755) {
+		if(settings::DRY_RUN)
+			return;
+
 		size_t		pos=0;
 		std::string	dir;
 
@@ -105,6 +110,29 @@ namespace {
 			if(mkdir(dir.c_str(),mode) && errno!=EEXIST)
 				throw fsarchive::rt_error("Can't init path ") << dir;
 		}
+	}
+
+	void write_file(const std::string& f, const buffer_t& buf_file) {
+		if(settings::DRY_RUN)
+			return;
+
+		std::ofstream	ostr(f, std::ios_base::binary);
+		if((long int)buf_file.size() != ostr.write((const char*)buf_file.data(), buf_file.size()).tellp())
+			throw fsarchive::rt_error("Can't restore file ") << f << " on the disk";
+	}
+
+	void update_metadata(const std::string& f, const stat64_t& s) {
+		if(settings::DRY_RUN)
+			return;
+
+		if(chmod(f.c_str(), 07777 & s.fs_mode))
+			LOG_WARNING << "Can't set permissions for file/directory " << f;
+		// the below cast should work because the structure is aligned
+		// with the spec of utime data structure https://linux.die.net/man/2/utime
+		if(utime(f.c_str(), (const struct utimbuf *)&s.fs_atime))
+			LOG_WARNING << "Can't update times for file/directory " << f;
+		if(chown(f.c_str(), s.fs_uid, s.fs_gid))
+			LOG_WARNING << "Can't set user/group id for file/directory " << f;
 	}
 
 	void load_file(const std::string& f, buffer_t& out) {
@@ -288,13 +316,15 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 	// then write from scratch
 	if(ar_files.empty() || settings::AR_FORCE_NEW) {
 		LOG_INFO << "Building an archive from scratch: " << ar_next_path;
-		zip_fs		z(ar_next_path.c_str(), false);
+		pzip_fs_t	z(settings::DRY_RUN ? 0 : std::make_unique<zip_fs>(ar_next_path.c_str(), false));
 		auto fn_on_elem = [&z](const std::string& f, const struct stat64& s) -> void {
 			if(S_ISREG(s.st_mode)) {
-				z.add_file_new(f, fsarc_stat64_from_stat64(s));
+				if(z)
+					z->add_file_new(f, fsarc_stat64_from_stat64(s));
 				LOG_INFO << "File '" << f << "' has been added as new (NEW)";
 			} else if (S_ISDIR(s.st_mode)) {
-				z.add_directory(f, fsarc_stat64_from_stat64(s));
+				if(z)
+					z->add_directory(f, fsarc_stat64_from_stat64(s));
 				LOG_INFO << "Directory '" << f << "' has been added";
 			}
 		};
@@ -302,11 +332,11 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			r_fs_scan(in_dirs[i], fn_on_elem, excl);
 	} else {
 		// otherwise load the latest archive
-		LOG_INFO << "Building a delta archive: " << *ar_files.rbegin() << " -> " << ar_next_path;
+		LOG_INFO << "Building a delta archive: " << ar_next_path << " -> " << *ar_files.rbegin();
 		const auto&	z_latest_name = *ar_files.rbegin();
-		zip_fs		z_latest(combine_paths(settings::AR_DIR, z_latest_name), true);
+		const zip_fs	z_latest(combine_paths(settings::AR_DIR, z_latest_name), true);
 		// we need to generate a new 'delta' archive
-		zip_fs		z_next(ar_next_path.c_str(), false);
+		pzip_fs_t	z_next(settings::DRY_RUN ? 0 : std::make_unique<zip_fs>(ar_next_path.c_str(), false));
 		// then we need to get all the files
 		fileset_t	all_files;
 		{
@@ -330,7 +360,8 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			p_delta.update_completion(1.0*(p_num++)/all_files.size());
 			// if f is a directory, just add it to the new archive
 			if(S_ISDIR(f.second.fs_mode)) {
-				z_next.add_directory(f.first, f.second);
+				if(z_next)
+					z_next->add_directory(f.first, f.second);
 				LOG_INFO << "Directory '" << f.first << "' has been added";
 				continue;
 			}
@@ -338,7 +369,8 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			const auto	it_latest = latest_fileset.find(f.first);
 			if(it_latest == latest_fileset.end()) {
 				// brand new file
-				z_next.add_file_new(f.first, f.second);
+				if(z_next)
+					z_next->add_file_new(f.first, f.second);
 				LOG_INFO << "File '" << f.first << "' has been added as new (NEW)";
 			} else if((f.second.fs_mtime != it_latest->second.fs_mtime) ||
 				  (f.second.fs_size != it_latest->second.fs_size)) {
@@ -359,14 +391,16 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				if(bsdiff(p_data.data(), p_data.size(), n_data.data(), n_data.size(), &bsd_s))
 					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
 				// and finally add it
-				z_next.add_file_bsdiff(f.first, f.second, s_diff.str(), z_latest_name.c_str());
+				if(z_next)
+					z_next->add_file_bsdiff(f.first, f.second, s_diff.str(), z_latest_name.c_str());
 				LOG_INFO << "File '" << f.first << "' has been added as changed (MOD) -> " << z_latest_name;
 			} else {
 				// unchanged file
 				// optimization - if the file is unchanged in z_latest as well,
 				// then use its prev!
 				const char *prev_unc = (FS_TYPE_FILE_UNC == it_latest->second.fs_type) ? it_latest->second.fs_prev : z_latest_name.c_str();
-				z_next.add_file_unchanged(f.first, f.second, prev_unc);
+				if(z_next)
+					z_next->add_file_unchanged(f.first, f.second, prev_unc);
 				LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
 			}
 		}
@@ -381,7 +415,7 @@ void fsarchive::restore_archive(void) {
 	if(settings::RE_FILE.empty() || lstat64(settings::RE_FILE.c_str(), &s) || !S_ISREG(s.st_mode))
 		throw fsarchive::rt_error("Archive to restore is empty and/or file doesn't exist/is not accessible ") << settings::RE_FILE;
 
-	zip_fs	z(settings::RE_FILE, true);
+	const zip_fs	z(settings::RE_FILE, true);
 
 	pprogress_t	p_restore(std::make_unique<log::progress>("Restoring zip data"));
 	size_t		p_num = 0;
@@ -414,29 +448,21 @@ void fsarchive::restore_archive(void) {
 			init_paths(out_file.substr(0, it_l_slash+1));
 		buffer_t	buf_file;
 		r_rebuild_file(z, f.first, buf_file, zcache);
-		std::ofstream	ostr(out_file, std::ios_base::binary);
-		if((long int)buf_file.size() != ostr.write((const char*)buf_file.data(), buf_file.size()).tellp())
-			throw fsarchive::rt_error("Can't restore file ") << f.first << " on the disk " << out_file;
+		write_file(out_file, buf_file);
 	}
 	p_restore->update_completion(1.0);
 	p_restore.reset();
-	if(!settings::RE_METADATA)
-		return;
-	p_restore = std::make_unique<log::progress>("Restoring metadata");
-	p_num = 0;
-	// then change all permissions/ownership/etc etc
-	for(const auto& f : re_fs) {
-		p_restore->update_completion(1.0*(p_num++)/re_fs.size());
-		const std::string	out_file = fn_out_file(f.first);
-		if(chmod(out_file.c_str(), 07777 & f.second.fs_mode))
-			LOG_WARNING << "Can't set permissions for file/directory " << out_file;
-		// the below cast should work because the structure is aligned
-		// with the spec of utime data structure https://linux.die.net/man/2/utime
-		if(utime(out_file.c_str(), (const struct utimbuf *)&f.second.fs_atime))
-			LOG_WARNING << "Can't update times for file/directory " << out_file;
-		if(chown(out_file.c_str(), f.second.fs_uid, f.second.fs_gid))
-			LOG_WARNING << "Can't set user/group id for file/directory " << out_file;
+	// update metadata if so - default
+	if(settings::RE_METADATA) {
+		p_restore = std::make_unique<log::progress>("Restoring metadata");
+		p_num = 0;
+		// then change all permissions/ownership/etc etc
+		for(const auto& f : re_fs) {
+			p_restore->update_completion(1.0*(p_num++)/re_fs.size());
+			const std::string	out_file = fn_out_file(f.first);
+			update_metadata(out_file, f.second);
+		}
+		p_restore->update_completion(1.0);
 	}
-	p_restore->update_completion(1.0);
 }
 

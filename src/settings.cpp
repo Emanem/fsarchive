@@ -49,6 +49,7 @@ namespace {
 				"                        can have suffixes such as k, m and g to respectively interpret as KiB, MiB and GiB\n"
 				"                        By default this is disabled\n"
 				"    --no-metadata       Do not restore metadata (file/dir ownership, permission and times)\n"
+				"    --dry-run           Flag to execute the command as indicated without writing/amending any file/metadata\n"
 				"    --help              Prints this help and exit\n\n"
 		<< std::flush;
 	}
@@ -65,6 +66,7 @@ namespace fsarchive {
 		excllist_t	AR_EXCLUSIONS;
 		int64_t		AR_SZ_FILTER = -1;
 		bool		RE_METADATA = true;
+		bool		DRY_RUN = false;
 	}
 }
 
@@ -82,6 +84,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"exclude",	required_argument, 0,	'x'},
 		{"size-filter",	required_argument, 0,	0},
 		{"no-metadata",	no_argument,	   0,	0},
+		{"dry-run",	no_argument,	   0,	0},
 		{0, 0, 0, 0}
 	};
 	
@@ -129,6 +132,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 					throw fsarchive::rt_error("Invalid size filter provided: ") << optarg;
 			} else if(!std::strcmp("no-metadata", long_options[option_index].name)) {
 				RE_METADATA = false;
+			} else if(!std::strcmp("dry-run", long_options[option_index].name)) {
+				DRY_RUN = true;
 			}
 		} break;
 
