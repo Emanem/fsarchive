@@ -24,7 +24,7 @@
 #include "utils.h"
 
 namespace {
-	const char*	__version__ = "0.1.1";
+	const char*	__version__ = "0.1.2";
 }
 
 int main(int argc, char *argv[]) {

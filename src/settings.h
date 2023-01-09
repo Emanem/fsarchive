@@ -36,12 +36,13 @@ namespace fsarchive {
 
 		extern int		AR_ACTION;
 		extern std::string	AR_DIR;
-		extern std::string	RE_FILE;
-		extern std::string	RE_DIR;
 		extern int		AR_COMP_LEVEL;
 		extern bool		AR_FORCE_NEW;
 		extern excllist_t	AR_EXCLUSIONS;
 		extern int64_t		AR_SZ_FILTER;
+		extern bool		AR_NO_BSDIFF;
+		extern std::string	RE_FILE;
+		extern std::string	RE_DIR;
 		extern bool		RE_METADATA;
 		extern bool		DRY_RUN;
 	}

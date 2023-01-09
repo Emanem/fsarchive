@@ -374,6 +374,13 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				LOG_INFO << "File '" << f.first << "' has been added as new (NEW)";
 			} else if((f.second.fs_mtime != it_latest->second.fs_mtime) ||
 				  (f.second.fs_size != it_latest->second.fs_size)) {
+				// in case we don't want any bsdiff
+				if(settings::AR_NO_BSDIFF) {
+					if(z_next)
+						z_next->add_file_new(f.first, f.second);
+					LOG_INFO << "File '" << f.first << "' has been added as new (NEW - no bsdiff)";
+					continue;
+				}
 				// changed file
 				// first rebuild the file
 				buffer_t	p_data;

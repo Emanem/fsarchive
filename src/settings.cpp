@@ -23,23 +23,24 @@
 #include <stdexcept>
 #include "settings.h"
 #include "utils.h"
+#include "log.h"
 
 namespace {
 	// settings/options management
 	void print_help(const char *prog, const char *version) {
 		using namespace fsarchive::settings;
 
-		std::cerr <<	"Usage: " << prog << " [options] dir1 dir2 ... \nExecutes fsarchive " << version << "\n\n"
+		std::cerr <<	"Usage: " << prog << " [options] dir1 dir2 ... \nExecutes fsarchive " << version << "\n"
+				"\nArchive options\n\n"
 				"-a, --archive (dir)     Archives all input files (dir1, dir2, ...) and directories inside\n"
 				"                        (dir)/fsarchive_<timestamp>.zip and/or updates existing archives generating a new\n"
 			        "                        and/or delta (dir)/fsarchive_<timestamp>.zip\n"
-				"-r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so\n"
-				"                        Specify -d to allow another directory to be the target destination for the restore\n"
-				"-d, --restore-dir (dir) Sets the restore directory to this location\n"
 				"    --comp-level (l)    Sets the compression level to (l) (from 1 to 9) where 1 is fastest and 9 is best.\n"
 				"                        0 is default\n"
 				"    --force-new-arc     Flag to force the creation of a new archive (-a option) even if a previous already\n"
 				"                        exists (i.e. no delta archive would be created)\n"
+				"    --no-bsdiff         When creating delta archives do not store file differences as bsdiff/bspatch data\n"
+				"                        but simply store files with differences as new/full\n"
 				"-x, --exclude (str)     Excludes from archiving all the files/directories which match (str); if you want\n"
 				"                        to have a 'contain' search, do specify the \"*(str)*\" pattern (i.e. -x \"*abc*\"\n"
 				"                        will exclude all the files/dirs which contain the sequence 'abc').\n"
@@ -47,8 +48,13 @@ namespace {
 				"                        as a literal character; you can specify multiple exclusions (i.e. -x ex1 -x ex2 ... )\n"
 				"    --size-filter (sz)  Set a maximum file size filter of size (sz); has to be a positive value (bytes) and\n"
 				"                        can have suffixes such as k, m and g to respectively interpret as KiB, MiB and GiB\n"
-				"                        By default this is disabled\n"
+				"\nRestore options\n\n"
+				"-r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so\n"
+				"                        Specify -d to allow another directory to be the target destination for the restore\n"
+				"-d, --restore-dir (dir) Sets the restore directory to this location\n"
 				"    --no-metadata       Do not restore metadata (file/dir ownership, permission and times)\n"
+				"\nGeneric options\n\n"
+				"-v, --verbose           Set log to maximum level\n"
 				"    --dry-run           Flag to execute the command as indicated without writing/amending any file/metadata\n"
 				"    --help              Prints this help and exit\n\n"
 		<< std::flush;
@@ -59,12 +65,13 @@ namespace fsarchive {
 	namespace settings {
 		int		AR_ACTION = A_NONE;
 		std::string	AR_DIR = "";
-		std::string	RE_FILE = "";
-		std::string	RE_DIR = "";
 		int		AR_COMP_LEVEL = 0;
 		bool		AR_FORCE_NEW = false;
 		excllist_t	AR_EXCLUSIONS;
 		int64_t		AR_SZ_FILTER = -1;
+		bool		AR_NO_BSDIFF = false;
+		std::string	RE_FILE = "";
+		std::string	RE_DIR = "";
 		bool		RE_METADATA = true;
 		bool		DRY_RUN = false;
 	}
@@ -85,6 +92,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"size-filter",	required_argument, 0,	0},
 		{"no-metadata",	no_argument,	   0,	0},
 		{"dry-run",	no_argument,	   0,	0},
+		{"no-bsdiff",	no_argument,	   0,	0},
+		{"verbose",	no_argument,	   0,	'v'},
 		{0, 0, 0, 0}
 	};
 	
@@ -92,7 +101,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
         	// getopt_long stores the option index here
         	int		option_index = 0;
 
-		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:", long_options, &option_index)))
+		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:v", long_options, &option_index)))
        			break;
 
 		switch (c) {
@@ -134,6 +143,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 				RE_METADATA = false;
 			} else if(!std::strcmp("dry-run", long_options[option_index].name)) {
 				DRY_RUN = true;
+			} else if(!std::strcmp("no-bsdiff", long_options[option_index].name)) {
+				AR_NO_BSDIFF = true;
 			}
 		} break;
 
@@ -162,6 +173,10 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 
 		case 'x': {
 			AR_EXCLUSIONS.insert(optarg);
+		} break;
+
+		case 'v' : {
+			log::set_level(log::L_SPAM);
 		} break;
 
 		case '?':
