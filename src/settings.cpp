@@ -37,6 +37,7 @@ namespace {
 			        "                        and/or delta (dir)/fsarchive_<timestamp>.zip\n"
 				"    --comp-level (l)    Sets the compression level to (l) (from 1 to 9) where 1 is fastest and 9 is best.\n"
 				"                        0 is default\n"
+				"    --no-comp           Flag to create zip files without any compression - default off\n"
 				"    --force-new-arc     Flag to force the creation of a new archive (-a option) even if a previous already\n"
 				"                        exists (i.e. no delta archive would be created)\n"
 				"    --no-bsdiff         When creating delta archives do not store file differences as bsdiff/bspatch data\n"
@@ -70,6 +71,7 @@ namespace fsarchive {
 		excllist_t	AR_EXCLUSIONS;
 		int64_t		AR_SZ_FILTER = -1;
 		bool		AR_NO_BSDIFF = false;
+		bool		AR_COMPRESS = true;
 		std::string	RE_FILE = "";
 		std::string	RE_DIR = "";
 		bool		RE_METADATA = true;
@@ -94,6 +96,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"dry-run",	no_argument,	   0,	0},
 		{"no-bsdiff",	no_argument,	   0,	0},
 		{"verbose",	no_argument,	   0,	'v'},
+		{"no-comp", 	no_argument,	   0,	0},
 		{0, 0, 0, 0}
 	};
 	
@@ -145,6 +148,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 				DRY_RUN = true;
 			} else if(!std::strcmp("no-bsdiff", long_options[option_index].name)) {
 				AR_NO_BSDIFF = true;
+			} else if(!std::strcmp("no-comp", long_options[option_index].name)) {
+				AR_COMPRESS = false;
 			}
 		} break;
 

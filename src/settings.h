@@ -41,6 +41,7 @@ namespace fsarchive {
 		extern excllist_t	AR_EXCLUSIONS;
 		extern int64_t		AR_SZ_FILTER;
 		extern bool		AR_NO_BSDIFF;
+		extern bool		AR_COMPRESS;
 		extern std::string	RE_FILE;
 		extern std::string	RE_DIR;
 		extern bool		RE_METADATA;
