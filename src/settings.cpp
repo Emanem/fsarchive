@@ -195,7 +195,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 
 		case 'f': {
 			AR_COMP_FILTER.insert(optarg);
-		}
+		} break;
 
 		case '?':
 			return -1;
