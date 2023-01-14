@@ -153,7 +153,7 @@ namespace {
 		if(!S_ISDIR(s.st_mode))
 			throw fsarchive::rt_error("Not a directory: ") << p;
 		// set next file path
-		char	ts[16] = {0};
+		char	ts[68] = {0};
 		{
 			struct tm	cur_tm = {0};
 			const time_t	cur_t = time(0);
