@@ -153,7 +153,14 @@ namespace {
 		if(!S_ISDIR(s.st_mode))
 			throw fsarchive::rt_error("Not a directory: ") << p;
 		// set next file path
-		ar_next_path = combine_paths(p, FS_ARCHIVE_BASE) + std::to_string(time(0)) + ".zip";
+		char	ts[16] = {0};
+		{
+			struct tm	cur_tm = {0};
+			const time_t	cur_t = time(0);
+			localtime_r(&cur_t, &cur_tm);
+			snprintf(ts, sizeof(ts), "%04d%02d%02d-%02d%02d%02d", 1900+cur_tm.tm_year, 1+cur_tm.tm_mon, cur_tm.tm_mday, cur_tm.tm_hour, cur_tm.tm_min, cur_tm.tm_sec);
+		}
+		ar_next_path = combine_paths(p, FS_ARCHIVE_BASE) + ts + ".zip";
 		// then open current directory and scen for fsarchive zip files
 		ar_files.clear();
 		std::unique_ptr<DIR, void (*)(DIR*)> p_dir(opendir(p.c_str()), [](DIR *d){ if(d) closedir(d);});
