@@ -33,7 +33,7 @@ namespace {
 	}
 }
 
-bool fsarchive::zip_fs::add_data(zip_source_t *p_zf, const std::string& f, const fsarchive::stat64_t& fs, const char *prev, const uint32_t type) {
+bool fsarchive::zip_fs::add_data(zip_source_t *p_zf, const std::string& f, const fsarchive::stat64_t& fs, const char *prev, const uint32_t type, const bool compress) {
 	if(f_map_.find(f) != f_map_.end()) {
 		LOG_WARNING << "Couldn't add file '" << f << "' to archive " << z_ << "; already existing";
 		return false;
@@ -43,7 +43,8 @@ bool fsarchive::zip_fs::add_data(zip_source_t *p_zf, const std::string& f, const
 		zip_source_free(p_zf);
 		throw fsarchive::rt_error("Can't add file/data ") << f << " (type " << type << ") to the archive";
 	}
-	if(zip_set_file_compression(z_, idx, (settings::AR_COMPRESS) ? ZIP_CM_DEFLATE : ZIP_CM_STORE, (zip_uint32_t) (settings::AR_COMPRESS) ? settings::AR_COMP_LEVEL : 0))
+	const bool	do_comp = compress && settings::AR_COMPRESS;
+	if(zip_set_file_compression(z_, idx, (do_comp) ? ZIP_CM_DEFLATE : ZIP_CM_STORE, (zip_uint32_t) (do_comp) ? settings::AR_COMP_LEVEL : 0))
 		throw fsarchive::rt_error("Can't set compression level for file/data ") << f << " (type " << type << ") to the archive";
 	// https://libzip.org/documentation/zip_file_extra_field_set.html
 	// we can't use the info libzip stamps because the mtime is off
@@ -86,11 +87,11 @@ fsarchive::zip_fs::zip_fs(const std::string& fname, const bool ro) : z_(zip_open
 	LOG_INFO << "Opened zip '" <<  fname << "' with " << f_map_.size() << " entries, id " << z_ << ((ro) ? " (R/O)" : " (W/O)");
 }
 
-bool fsarchive::zip_fs::add_file_new(const std::string& f, const fsarchive::stat64_t& fs) {
+bool fsarchive::zip_fs::add_file_new(const std::string& f, const fsarchive::stat64_t& fs, const bool compress) {
 	zip_source_t	*p_zf = zip_source_file_create(f.c_str(), 0, -1, 0);
 	if(!p_zf)
 		throw fsarchive::rt_error("Can't open source file for zip ") << f;
-	return add_data(p_zf, f, fs, 0, FS_TYPE_FILE_NEW);
+	return add_data(p_zf, f, fs, 0, FS_TYPE_FILE_NEW, compress);
 }
 
 bool fsarchive::zip_fs::add_file_bsdiff(const std::string& f, const fsarchive::stat64_t& fs, const std::string& diff, const char* prev) {

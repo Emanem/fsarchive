@@ -37,6 +37,9 @@ namespace {
 			        "                        and/or delta (dir)/fsarchive_<timestamp>.zip\n"
 				"    --comp-level (l)    Sets the compression level to (l) (from 1 to 9) where 1 is fastest and 9 is best.\n"
 				"                        0 is default\n"
+				"-f, --comp-filter (f)   Excludes files from being compresses; this option follows same format as -x option\n"
+				"                        and can be repeated multiple times; files matching such expressions won't be compressed\n"
+				"                        Files that are excluded from compression are also excluded from bsdiff deltas\n"
 				"    --no-comp           Flag to create zip files without any compression - default off\n"
 				"    --force-new-arc     Flag to force the creation of a new archive (-a option) even if a previous already\n"
 				"                        exists (i.e. no delta archive would be created)\n"
@@ -76,6 +79,7 @@ namespace fsarchive {
 		int64_t		AR_SZ_FILTER = -1;
 		bool		AR_NO_BSDIFF = false;
 		bool		AR_COMPRESS = true;
+		excllist_t	AR_COMP_FILTER;
 		std::string	RE_FILE = "";
 		std::string	RE_DIR = "";
 		bool		RE_METADATA = true;
@@ -101,6 +105,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"no-bsdiff",	no_argument,	   0,	0},
 		{"verbose",	no_argument,	   0,	'v'},
 		{"no-comp", 	no_argument,	   0,	0},
+		{"comp-filter", required_argument, 0,	'f'},
 		{0, 0, 0, 0}
 	};
 	
@@ -108,7 +113,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
         	// getopt_long stores the option index here
         	int		option_index = 0;
 
-		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:v", long_options, &option_index)))
+		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:vf:", long_options, &option_index)))
        			break;
 
 		switch (c) {
@@ -184,9 +189,13 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 			AR_EXCLUSIONS.insert(optarg);
 		} break;
 
-		case 'v' : {
+		case 'v': {
 			log::set_level(log::L_SPAM);
 		} break;
+
+		case 'f': {
+			AR_COMP_FILTER.insert(optarg);
+		}
 
 		case '?':
 			return -1;

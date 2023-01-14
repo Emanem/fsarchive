@@ -317,19 +317,30 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		.r_excl = init_regex(settings::AR_EXCLUSIONS),
 		.sz_excl = settings::AR_SZ_FILTER,
 	};
+	const regexvec_t	ar_comp_filter = init_regex(settings::AR_COMP_FILTER);
+	auto 			fn_comp_filter	= [&ar_comp_filter](const std::string& f) -> bool {
+		for(const auto& r : ar_comp_filter) {
+			std::smatch	s;
+			if(std::regex_match(f, s, r)) {
+				LOG_INFO << "File " << f << " won't be compressed";
+				return true;
+			}
+		}
+		return false;
+	};
 	// let's check that we have a valid directory
-	std::string	ar_next_path;
-	filelist_t	ar_files;
+	std::string		ar_next_path;
+	filelist_t		ar_files;
 	check_dir_fsarchives(settings::AR_DIR, ar_next_path, ar_files);
 	// if we don't have any files or the AR_FORCE_NEW is set
 	// then write from scratch
 	if(ar_files.empty() || settings::AR_FORCE_NEW) {
 		LOG_INFO << "Building an archive from scratch: " << ar_next_path;
 		pzip_fs_t	z(settings::DRY_RUN ? 0 : std::make_unique<zip_fs>(ar_next_path.c_str(), false));
-		auto fn_on_elem = [&z](const std::string& f, const struct stat64& s) -> void {
+		auto fn_on_elem = [&z, &fn_comp_filter](const std::string& f, const struct stat64& s) -> void {
 			if(S_ISREG(s.st_mode)) {
 				if(z)
-					z->add_file_new(f, fsarc_stat64_from_stat64(s));
+					z->add_file_new(f, fsarc_stat64_from_stat64(s), fn_comp_filter(f));
 				LOG_INFO << "File '" << f << "' has been added as new (NEW)";
 			} else if (S_ISDIR(s.st_mode)) {
 				if(z)
@@ -379,14 +390,16 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			if(it_latest == latest_fileset.end()) {
 				// brand new file
 				if(z_next)
-					z_next->add_file_new(f.first, f.second);
+					z_next->add_file_new(f.first, f.second, fn_comp_filter(f.first));
 				LOG_INFO << "File '" << f.first << "' has been added as new (NEW)";
 			} else if((f.second.fs_mtime != it_latest->second.fs_mtime) ||
 				  (f.second.fs_size != it_latest->second.fs_size)) {
 				// in case we don't want any bsdiff
-				if(settings::AR_NO_BSDIFF) {
+				// or current file is marked to be comp excluded
+				const bool	is_comp_excl = fn_comp_filter(f.first);
+				if(settings::AR_NO_BSDIFF || is_comp_excl) {
 					if(z_next)
-						z_next->add_file_new(f.first, f.second);
+						z_next->add_file_new(f.first, f.second, is_comp_excl);
 					LOG_INFO << "File '" << f.first << "' has been added as new (NEW - no bsdiff)";
 					continue;
 				}
