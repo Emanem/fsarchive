@@ -24,7 +24,7 @@
 #include "utils.h"
 
 namespace {
-	const char*	__version__ = "0.2.0";
+	const char*	__version__ = "0.2.1";
 }
 
 int main(int argc, char *argv[]) {
@@ -35,9 +35,11 @@ int main(int argc, char *argv[]) {
 		switch(fsarchive::settings::AR_ACTION) {
 			case fsarchive::settings::ACTION::A_ARCHIVE:
 				fsarchive::init_update_archive(argv + args_idx, argc - args_idx);
+				LOG_INFO << "Archive action completed";
 				break;
 			case fsarchive::settings::ACTION::A_RESTORE:
 				fsarchive::restore_archive();
+				LOG_INFO << "Restore action completed";
 				break;
 			default:
 				throw fsarchive::rt_error("Invalid action ") << fsarchive::settings::AR_ACTION << " need to specify -a or -r";

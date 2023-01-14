@@ -285,11 +285,20 @@ namespace {
 			std::stringstream	cur_regex;
 			// find all occurences of '*'
 			const char	*p_cur = r.c_str(),
-			      		*p_next_star = 0;
-			while((p_next_star = strchr(p_cur, '*'))) {
-				cur_regex << std::regex_replace(std::string(p_cur, p_next_star), special_chars, R"(\$&)");
-				cur_regex << ".*";
-				p_cur = p_next_star+1;
+					*p_next_c = 0;
+			while((p_next_c = strpbrk(p_cur, "*?"))) {
+				cur_regex << std::regex_replace(std::string(p_cur, p_next_c), special_chars, R"(\$&)");
+				switch(*p_next_c) {
+					case '*':
+						cur_regex << ".*";
+						break;
+					case '?':
+						cur_regex << "[^/]+";
+						break;
+					default:
+						throw fsarchive::rt_error("Invalid break RegEx sequence: ") << *p_next_c;
+				}
+				p_cur = p_next_c+1;
 			}
 			cur_regex << std::regex_replace(std::string(p_cur), special_chars, R"(\$&)");
 			//
