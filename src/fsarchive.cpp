@@ -221,6 +221,9 @@ namespace {
 		} else {
 			on_elem(f, s);
 			std::unique_ptr<DIR, void (*)(DIR*)> p_dir(opendir(f.c_str()), [](DIR *d){ if(d) closedir(d);});
+			// this is the case when we try to opena  directory we don't have permissions on
+			if(!p_dir)
+				throw fsarchive::rt_error("Invalid/unable to opendir directory: ") << f;
 			struct dirent64	*de = 0;
 			while((de = readdir64(p_dir.get()))) {
 				if(std::string(".") == de->d_name ||
