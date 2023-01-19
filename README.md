@@ -25,6 +25,17 @@ This mechinism would work for as amny archives/snapshots will be created over ti
 
 All the deltas would be in the form a full new files _or_ binary patches created through _bsdiff/bspatch_. If the latter case, only such information will be saved for changed files in delta archives, thus reducing the required space needed for such archive.
 
+## How to build
+You need to have the standard _gcc/g++_ and _libzip-dev_ installed (for example on ubuntu is `sudo apt install libzip-dev`) and then invoke
+```bash
+make -j32 #put your cpu cores
+```
+or
+```bash
+make release -j32 #put your cpu cores
+```
+Then you can copy the executable _fsarchive_ to your favourite `$PATH` location of your chosing.
+
 ## Usage
 As per _--help_ option:
 ```
