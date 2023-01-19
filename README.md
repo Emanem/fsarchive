@@ -95,7 +95,7 @@ In short, we save some fields from the output of [lstat64](https://linux.die.net
 _libzip_ (and in general the zip format) already saves some metadata, but is not as accurate as the one returned by _lstat64_ (some time values are off by a second), hence the lstat64 data is used.
 
 ### bsdiff/bspatch usage
-_bsdiff/bspatch_ are used to diff and then re-create files - see [fsarchive.cpp](https://github.com/Emanem/fsarchive/blob/main/src/fsarchive.cpp) for more insight).
+_bsdiff/bspatch_ are used to diff and then re-create files (see [fsarchive.cpp](https://github.com/Emanem/fsarchive/blob/main/src/fsarchive.cpp) for more insight).
 
 ### Memory requirements
 Due to the above binary patching, the memory requirements when running _fsarchive_ are potentially high - one should have at least _+2x_ of largest file being archived of memory available when creating/restoring archives. For this reason, the options _-x_ and/or _--size-filter_ and/or _-f_ are quite handy.
