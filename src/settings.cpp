@@ -43,8 +43,8 @@ namespace {
 				"    --no-comp           Flag to create zip files without any compression - default off\n"
 				"    --force-new-arc     Flag to force the creation of a new archive (-a option) even if a previous already\n"
 				"                        exists (i.e. no delta archive would be created)\n"
-				"    --no-bsdiff         When creating delta archives do not store file differences as bsdiff/bspatch data\n"
-				"                        but simply store files with differences as new/full\n"
+				"    --use-bsdiff        When creating delta archives do store file differences as bsdiff/bspatch data\n"
+				"                        Please note this may be rather slow and memory hungry\n"
 				"-x, --exclude (str)     Excludes from archiving all the files/directories which match (str); if you want\n"
 				"                        to have a 'contain' search, do specify the \"*(str)*\" pattern (i.e. -x \"*abc*\"\n"
 				"                        will exclude all the files/dirs which contain the sequence 'abc').\n"
@@ -78,7 +78,7 @@ namespace fsarchive {
 		bool		AR_FORCE_NEW = false;
 		excllist_t	AR_EXCLUSIONS;
 		int64_t		AR_SZ_FILTER = -1;
-		bool		AR_NO_BSDIFF = false;
+		bool		AR_USE_BSDIFF = false;
 		bool		AR_COMPRESS = true;
 		excllist_t	AR_COMP_FILTER;
 		std::string	RE_FILE = "";
@@ -103,7 +103,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"size-filter",	required_argument, 0,	0},
 		{"no-metadata",	no_argument,	   0,	0},
 		{"dry-run",	no_argument,	   0,	0},
-		{"no-bsdiff",	no_argument,	   0,	0},
+		{"use-bsdiff",	no_argument,	   0,	0},
 		{"verbose",	no_argument,	   0,	'v'},
 		{"no-comp", 	no_argument,	   0,	0},
 		{"comp-filter", required_argument, 0,	'f'},
@@ -156,8 +156,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 				RE_METADATA = false;
 			} else if(!std::strcmp("dry-run", long_options[option_index].name)) {
 				DRY_RUN = true;
-			} else if(!std::strcmp("no-bsdiff", long_options[option_index].name)) {
-				AR_NO_BSDIFF = true;
+			} else if(!std::strcmp("use-bsdiff", long_options[option_index].name)) {
+				AR_USE_BSDIFF = true;
 			} else if(!std::strcmp("no-comp", long_options[option_index].name)) {
 				AR_COMPRESS = false;
 			}

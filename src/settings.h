@@ -40,7 +40,7 @@ namespace fsarchive {
 		extern bool		AR_FORCE_NEW;
 		extern excllist_t	AR_EXCLUSIONS;
 		extern int64_t		AR_SZ_FILTER;
-		extern bool		AR_NO_BSDIFF;
+		extern bool		AR_USE_BSDIFF;
 		extern bool		AR_COMPRESS;
 		extern excllist_t	AR_COMP_FILTER;
 		extern std::string	RE_FILE;

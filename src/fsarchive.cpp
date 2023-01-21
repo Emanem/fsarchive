@@ -407,7 +407,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				// in case we don't want any bsdiff
 				// or current file is marked to be comp excluded
 				const bool	is_comp_excl = fn_comp_filter(f.first);
-				if(settings::AR_NO_BSDIFF || is_comp_excl) {
+				if(!settings::AR_USE_BSDIFF || is_comp_excl) {
 					if(z_next)
 						z_next->add_file_new(f.first, f.second, is_comp_excl);
 					LOG_INFO << "File '" << f.first << "' has been added as new (NEW - no bsdiff)";
