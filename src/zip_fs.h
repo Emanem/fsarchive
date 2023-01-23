@@ -67,13 +67,16 @@ namespace fsarchive {
 		zip_fs(const zip_fs&);
 		zip_fs& operator=(const zip_fs&);
 
-		bool add_data(zip_source_t *p_zf, const std::string& f, const stat64_t& fs, const char *prev, const uint32_t type, const bool compress = true);
+		bool add_data(zip_source_t *p_zf, const std::string& f, const stat64_t& fs, const char *prev, const uint32_t type, const int comp_level);
 	public:
 		zip_fs(const std::string& fname, const bool ro);
 
-		bool add_file_new(const std::string& f, const stat64_t& fs, const bool compress);
+		// comp_level < 0 -- do not compress
+		// comp_level == 0 -- default
+		// comp_level 1 .. 9 fastest .. best
+		bool add_file_new(const std::string& f, const stat64_t& fs, const int comp_level);
 
-		bool add_file_bsdiff(const std::string& f, const stat64_t& fs, const std::string& diff, const char* prev);
+		bool add_file_bsdiff(const std::string& f, const stat64_t& fs, const std::string& diff, const char* prev, const int comp_level);
 
 		bool add_file_unchanged(const std::string& f, const stat64_t& fs, const char* prev);
 

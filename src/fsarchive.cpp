@@ -328,15 +328,25 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		.sz_excl = settings::AR_SZ_FILTER,
 	};
 	const regexvec_t	ar_comp_filter = init_regex(settings::AR_COMP_FILTER);
-	auto 			fn_comp_filter	= [&ar_comp_filter](const std::string& f) -> bool {
+	auto 			fn_comp_filter	= [&ar_comp_filter](const std::string& f) -> int {
+		// if we don't need to compress
+		// just short circuit
+		if(!settings::AR_COMPRESS)
+			return -1;
+		// if we have specified a blanket
+		// compression level, just use it
+		if(settings::AR_COMP_LEVEL)
+			return settings::AR_COMP_LEVEL;
+		// otherwise try to filter - exclusions
 		for(const auto& r : ar_comp_filter) {
 			std::smatch	s;
 			if(std::regex_match(f, s, r)) {
 				LOG_INFO << "File " << f << " won't be compressed";
-				return true;
+				return -1;
 			}
 		}
-		return false;
+		// default compression
+		return 0;
 	};
 	// let's check that we have a valid directory
 	std::string		ar_next_path;
@@ -431,7 +441,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
 				// and finally add it
 				if(z_next)
-					z_next->add_file_bsdiff(f.first, f.second, s_diff.str(), z_latest_name.c_str());
+					z_next->add_file_bsdiff(f.first, f.second, s_diff.str(), z_latest_name.c_str(), fn_comp_filter(f.first));
 				LOG_INFO << "File '" << f.first << "' has been added as changed (MOD) -> " << z_latest_name;
 			} else {
 				// unchanged file
