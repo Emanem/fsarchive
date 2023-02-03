@@ -370,6 +370,12 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		};
 		for(int i=0; i < n; ++i)
 			r_fs_scan(in_dirs[i], fn_on_elem, excl);
+		// unforutnately due to the way libzip
+		// works we can't have a proper RAII
+		// container, hence had to call this
+		// separately from the destructor
+		if(z)
+			z->save_and_close();
 	} else {
 		// otherwise load the latest archive
 		LOG_INFO << "Building a delta archive: " << ar_next_path << " -> " << *ar_files.rbegin();
@@ -454,6 +460,11 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			}
 		}
 		p_delta.update_completion(1.0);
+		// finalize the archive and save it. similarly as
+		// per above, couldn't just leave this in the
+		// destructor
+		if(z_next)
+			z_next->save_and_close();
 	}
 }
 

@@ -57,6 +57,12 @@ namespace {
 				"                        You can specify multiple exclusions (i.e. -x ex1 -x ex2 ... )\n"
 				"    --size-filter (sz)  Set a maximum file size filter of size (sz); has to be a positive value (bytes) and\n"
 				"                        can have suffixes such as k, m and g to respectively interpret as KiB, MiB and GiB\n"
+				"-X, --builtin-excl      Flag to enable builtin exclusions; currently those are:\n"
+				"                        /home/?/.cache/*\n"
+				"                        /home/?/snap/firefox/common/.cache/*\n"
+				"                        /tmp/*\n"
+				"                        /dev/*\n"
+				"                        /proc/*\n"
 				"\nRestore options\n\n"
 				"-r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so\n"
 				"                        Specify -d to allow another directory to be the target destination for the restore\n"
@@ -101,6 +107,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"force-new-arc",no_argument,	   0,	0},
 		{"exclude",	required_argument, 0,	'x'},
 		{"size-filter",	required_argument, 0,	0},
+		{"builtin-excl",no_argument,	   0,	'X'},
 		{"no-metadata",	no_argument,	   0,	0},
 		{"dry-run",	no_argument,	   0,	0},
 		{"use-bsdiff",	no_argument,	   0,	0},
@@ -114,7 +121,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
         	// getopt_long stores the option index here
         	int		option_index = 0;
 
-		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:vf:", long_options, &option_index)))
+		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:vf:X", long_options, &option_index)))
        			break;
 
 		switch (c) {
@@ -188,6 +195,18 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 
 		case 'x': {
 			AR_EXCLUSIONS.insert(optarg);
+		} break;
+
+		case 'X': {
+			const char *builtin_excl[] = {
+				"/home/?/.cache/*",
+				"/home/?/snap/firefox/common/.cache/*",
+				"/tmp/*",
+				"/dev/*",
+				"/proc/*"
+			};
+			for(size_t i = 0; i < sizeof(builtin_excl)/sizeof(const char**); ++i)
+				AR_EXCLUSIONS.insert(builtin_excl[i]);
 		} break;
 
 		case 'v': {

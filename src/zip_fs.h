@@ -86,6 +86,10 @@ namespace fsarchive {
 
 		const fileset_t& get_fileset(void) const;
 
+		// this is not great but needed given the
+		// way libzip works
+		void save_and_close(void);
+
 		~zip_fs();
 	};
 }

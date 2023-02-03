@@ -40,7 +40,7 @@ Then you can copy the executable _fsarchive_ to your favourite `$PATH` location 
 As per _--help_ option:
 ```
 Usage: ./fsarchive [options] dir1 dir2 ... 
-Executes fsarchive 0.3.0
+Executes fsarchive 0.3.1
 
 Archive options
 
@@ -69,6 +69,12 @@ Archive options
                         You can specify multiple exclusions (i.e. -x ex1 -x ex2 ... )
     --size-filter (sz)  Set a maximum file size filter of size (sz); has to be a positive value (bytes) and
                         can have suffixes such as k, m and g to respectively interpret as KiB, MiB and GiB
+-X, --builtin-excl      Flag to enable builtin exclusions; currently those are:
+                        /home/?/.cache/*
+                        /home/?/snap/firefox/common/.cache/*
+                        /tmp/*
+                        /dev/*
+                        /proc/*
 
 Restore options
 
@@ -102,7 +108,7 @@ typedef struct _stat64 {
 	char	fs_prev[32];	// fsarchive previous archive to find unchanged file or file to apply a patch (can be recursive file1 --> patch0 --> patch1 ...)
 } stat64_t;
 ```
-In short, we save some fields from the output of [lstat64](https://linux.die.net/man/2/lstat64) and a specific couple ofr _fsarchive_ are added (see [zip_fs.h](https://github.com/Emanem/fsarchive/blob/main/src/zip_fs.h#L34)).
+In short, we save some fields from the output of [lstat64](https://linux.die.net/man/2/lstat64) and a specific couple of _fsarchive_ are added (see [zip_fs.h](https://github.com/Emanem/fsarchive/blob/main/src/zip_fs.h#L34)).
 _libzip_ (and in general the zip format) already saves some metadata, but is not as accurate as the one returned by _lstat64_ (some time values are off by a second), hence the lstat64 data is used.
 
 ### bsdiff/bspatch usage

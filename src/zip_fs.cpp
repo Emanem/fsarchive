@@ -158,7 +158,7 @@ const fsarchive::fileset_t& fsarchive::zip_fs::get_fileset(void) const {
 	return f_map_;
 }
 
-fsarchive::zip_fs::~zip_fs() {
+void fsarchive::zip_fs::save_and_close(void) {
 	if(!ro_) {
 		// if we're not in R/O mode, then log the progress
 		// to archive
@@ -166,7 +166,7 @@ fsarchive::zip_fs::~zip_fs() {
 		zip_register_progress_callback_with_state(z_, 0.0001, progress_cb, 0, &p);
 		if(zip_close(z_)) {
 			zip_error_t* err = zip_get_error(z_);
-			LOG_ERROR << "Couldn't close/finish zip file " << z_ << " : " << zip_error_strerror(err);
+			LOG_ERROR << "Couldn't save/close zip file " << z_ << " : " << zip_error_strerror(err);
 			zip_error_fini(err);
 			// let's try to find out which file was removed before it could be
 			// archived
@@ -180,11 +180,17 @@ fsarchive::zip_fs::~zip_fs() {
 				else
 					close(t_fd);
 			}
+			throw fsarchive::rt_error("Zip archive could not be saved/closed ") << z_;
 		} else {
 			// just a nice log completion
 			p.update_completion(1.0);
 		}
-	} else {
+		z_ = 0;
+	}
+}
+
+fsarchive::zip_fs::~zip_fs() {
+	if(z_) {
 		zip_close(z_);
 	}
 	LOG_SPAM << "Closed zip, id " << z_;
