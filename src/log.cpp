@@ -108,6 +108,14 @@ void fsarchive::log::progress::update_completion(const double c) {
 	do_print("", true);
 }
 
+void fsarchive::log::progress::reset_completion(const double c) {
+	completion_ = c;
+	do_print("", true);
+	cur_prg = 0;
+	do_print("", false);
+	completion_ = .0;
+}
+
 const std::string& fsarchive::log::progress::get_label(void) const {
 	return label_;
 }

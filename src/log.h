@@ -76,6 +76,8 @@ namespace fsarchive {
 
 			void update_completion(const double c);
 
+			void reset_completion(const double c);
+
 			const std::string& get_label(void) const;
 
 			const double get_completion(void) const;

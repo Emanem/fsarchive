@@ -459,7 +459,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
 			}
 		}
-		p_delta.update_completion(1.0);
+		p_delta.reset_completion(1.0);
 		// finalize the archive and save it. similarly as
 		// per above, couldn't just leave this in the
 		// destructor
