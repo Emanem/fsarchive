@@ -62,6 +62,7 @@ namespace fsarchive {
 		zip_t			*z_;
 		const bool		ro_;
 		fileset_t		f_map_;
+		filelist_t		tmp_files_;
 
 		zip_fs();
 		zip_fs(const zip_fs&);

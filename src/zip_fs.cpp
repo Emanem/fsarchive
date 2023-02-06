@@ -30,6 +30,21 @@ namespace {
 		fsarchive::log::progress	*l_p = (fsarchive::log::progress*)usr_ptr;
 		l_p->update_completion(p);
 	}
+
+	std::string create_write_tmp_file(const std::string& data) {
+		char	tmpfname[64] = "/tmp/fsarc-bsdiff-XXXXXX";
+		int	fd = mkstemp(tmpfname);
+		if(-1 == fd)
+			throw fsarchive::rt_error("Can't create tmp file: ") << tmpfname;
+		if((ssize_t)data.size() != write(fd, data.data(), data.size())) {
+			close(fd);
+			unlink(tmpfname);
+			throw fsarchive::rt_error("Can't write tmp file: ") << tmpfname;
+		} else {
+			close(fd);
+		}
+		return tmpfname;
+	}
 }
 
 bool fsarchive::zip_fs::add_data(zip_source_t *p_zf, const std::string& f, const fsarchive::stat64_t& fs, const char *prev, const uint32_t type, const int comp_level) {
@@ -94,20 +109,11 @@ bool fsarchive::zip_fs::add_file_new(const std::string& f, const fsarchive::stat
 }
 
 bool fsarchive::zip_fs::add_file_bsdiff(const std::string& f, const fsarchive::stat64_t& fs, const std::string& diff, const char* prev, const int comp_level) {
-	// in short, we have to duplicate the buffer...
-	// https://stackoverflow.com/questions/73820283/add-multiple-files-from-buffers-to-zip-archive-using-libzip
-	// https://stackoverflow.com/questions/73721970/how-to-construct-a-zip-file-with-libzip
-	// https://stackoverflow.com/questions/74988236/can-libzip-reliably-write-in-zip-archives-from-buffers-memory-not-files
-	// this is not great...
-	uint8_t		*dup_diff = (uint8_t*)malloc(diff.size());
-	if(!dup_diff)
-		throw fsarchive::rt_error("Can't duplicate buffer to insert diff file in zip ") << f;
-	memcpy(dup_diff, diff.data(), diff.size());
-	zip_source_t	*p_zf = zip_source_buffer(z_, (const void*)dup_diff, diff.size(), 1);
-	if(!p_zf) {
-		free(dup_diff);
-		throw fsarchive::rt_error("Can't create buffer for diff file for zip ") << f;
-	}
+	const std::string	tmp_f = create_write_tmp_file(diff);
+	tmp_files_.insert(tmp_f);
+	zip_source_t		*p_zf = zip_source_file_create(tmp_f.c_str(), 0, -1, 0);
+	if(!p_zf)
+		throw fsarchive::rt_error("Can't open source diff file for zip ") << tmp_f;
 	return add_data(p_zf, f, fs, prev, FS_TYPE_FILE_MOD, comp_level);
 }
 
@@ -193,6 +199,12 @@ fsarchive::zip_fs::~zip_fs() {
 	if(z_) {
 		zip_close(z_);
 	}
+	// at this stage, do unlink all
+	// the temporary files, thus
+	// deleting the same
+	for(const auto& f : tmp_files_)
+		if(unlink(f.c_str()))
+			LOG_WARNING << "Can't unlink temporary file " << f;
 	LOG_SPAM << "Closed zip, id " << z_;
 }
 

@@ -43,7 +43,7 @@ namespace {
 				"    --no-comp           Flag to create zip files without any compression - default off\n"
 				"    --force-new-arc     Flag to force the creation of a new archive (-a option) even if a previous already\n"
 				"                        exists (i.e. no delta archive would be created)\n"
-				"    --use-bsdiff        When creating delta archives do store file differences as bsdiff/bspatch data\n"
+				"-b, --use-bsdiff        When creating delta archives do store file differences as bsdiff/bspatch data\n"
 				"                        Please note this may be rather slow and memory hungry\n"
 				"-x, --exclude (str)     Excludes from archiving all the files/directories which match (str); if you want\n"
 				"                        to have a 'contain' search, do specify the \"*(str)*\" pattern (i.e. -x \"*abc*\"\n"
@@ -110,7 +110,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"builtin-excl",no_argument,	   0,	'X'},
 		{"no-metadata",	no_argument,	   0,	0},
 		{"dry-run",	no_argument,	   0,	0},
-		{"use-bsdiff",	no_argument,	   0,	0},
+		{"use-bsdiff",	no_argument,	   0,	'b'},
 		{"verbose",	no_argument,	   0,	'v'},
 		{"no-comp", 	no_argument,	   0,	0},
 		{"comp-filter", required_argument, 0,	'f'},
@@ -121,7 +121,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
         	// getopt_long stores the option index here
         	int		option_index = 0;
 
-		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:vf:X", long_options, &option_index)))
+		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:vf:Xb", long_options, &option_index)))
        			break;
 
 		switch (c) {
@@ -163,8 +163,6 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 				RE_METADATA = false;
 			} else if(!std::strcmp("dry-run", long_options[option_index].name)) {
 				DRY_RUN = true;
-			} else if(!std::strcmp("use-bsdiff", long_options[option_index].name)) {
-				AR_USE_BSDIFF = true;
 			} else if(!std::strcmp("no-comp", long_options[option_index].name)) {
 				AR_COMPRESS = false;
 			}
@@ -215,6 +213,10 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 
 		case 'f': {
 			AR_COMP_FILTER.insert(optarg);
+		} break;
+
+		case 'b': {
+			AR_USE_BSDIFF = true;
 		} break;
 
 		case '?':
