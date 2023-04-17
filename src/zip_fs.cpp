@@ -73,7 +73,7 @@ bool fsarchive::zip_fs::add_data(zip_source_t *p_zf, const std::string& f, const
 	fs_t.fs_type = type;
 	if(zip_file_extra_field_set(z_, idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs_t, sizeof(fs_t), ZIP_FL_LOCAL))
 		throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for file ") << f;
-	f_map_[f] = fs_t;
+	f_map_[f] = {.s = fs_t, .crc = 0};
 	LOG_SPAM << "File/data '" << f << "' (type " << type << ") added to archive " << z_;
 	return true;
 }
@@ -92,7 +92,7 @@ fsarchive::zip_fs::zip_fs(const std::string& fname, const bool ro) : z_(zip_open
 		zip_uint16_t	len = 0;
 		const auto *pf = zip_file_extra_field_get_by_id(z_, i, FS_ZIP_EXTRA_FIELD_ID, 0, &len, ZIP_FL_LOCAL);
 		if(pf) {
-			f_map_[st.name] = *(stat64_t*)pf;
+			f_map_[st.name] = {.s = *(stat64_t*)pf, .crc = (st.valid & ZIP_STAT_CRC) ? st.crc : 0 };
 		} else {
 			zip_close(z_);
 			throw fsarchive::rt_error("Couldn't find FS_ZIP_EXTRA_FIELD_ID for file ") << st.name;
@@ -130,7 +130,7 @@ bool fsarchive::zip_fs::add_directory(const std::string& d, const fsarchive::sta
 		throw fsarchive::rt_error("Can't add directory ") << d << " to archive";
 	if(zip_file_extra_field_set(z_, d_idx, FS_ZIP_EXTRA_FIELD_ID, 0, (const zip_uint8_t*)&fs, sizeof(fs), ZIP_FL_LOCAL))
 		throw fsarchive::rt_error("Can't set extra field FS_ZIP_EXTRA_FIELD_ID for directory ") << d;
-	f_map_[d] = fs;
+	f_map_[d] = {.s = fs, .crc = 0};
 	LOG_SPAM << "Directory '" << d << "' added to archive " << z_;
 	return true;
 }
@@ -141,7 +141,7 @@ bool fsarchive::zip_fs::extract_file(const std::string& f, fsarchive::buffer_t& 
 		LOG_WARNING << "Can't extract/find file '" << f << "' in archive " << z_;
 		return false;
 	}
-	stat = it_f->second;
+	stat = it_f->second.s;
 	const auto z_idx = zip_name_locate(z_, f.c_str(), 0);
 	if(-1 == z_idx)
 		throw fsarchive::rt_error("Can't locate file ") << f << " in archive";
@@ -160,7 +160,7 @@ bool fsarchive::zip_fs::extract_file(const std::string& f, fsarchive::buffer_t& 
 	return true;
 }
 
-const fsarchive::fileset_t& fsarchive::zip_fs::get_fileset(void) const {
+const fsarchive::fileset_ext_t& fsarchive::zip_fs::get_fileset(void) const {
 	return f_map_;
 }
 
