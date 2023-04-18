@@ -63,6 +63,9 @@ namespace {
 				"                        /tmp/*\n"
 				"                        /dev/*\n"
 				"                        /proc/*\n"
+				"    --crc32-check       When creating delta archives, use CRC32 to establish if a file has changed, otherwise\n"
+				"                        only size and last modified timestamp will be used; the latter (no CRC32 check) is\n"
+				"                        default behaviour\n"
 				"\nRestore options\n\n"
 				"-r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so\n"
 				"                        Specify -d to allow another directory to be the target destination for the restore\n"
@@ -91,6 +94,7 @@ namespace fsarchive {
 		std::string	RE_DIR = "";
 		bool		RE_METADATA = true;
 		bool		DRY_RUN = false;
+		bool		CRC32_CHECK = false;
 	}
 }
 
@@ -114,6 +118,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"verbose",	no_argument,	   0,	'v'},
 		{"no-comp", 	no_argument,	   0,	0},
 		{"comp-filter", required_argument, 0,	'f'},
+		{"crc32-check", no_argument,	   0,	0},
 		{0, 0, 0, 0}
 	};
 	
@@ -165,6 +170,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 				DRY_RUN = true;
 			} else if(!std::strcmp("no-comp", long_options[option_index].name)) {
 				AR_COMPRESS = false;
+			} else if(!std::strcmp("crc32-check", long_options[option_index].name)) {
+				CRC32_CHECK = true;
 			}
 		} break;
 

@@ -47,6 +47,7 @@ namespace fsarchive {
 		extern std::string	RE_DIR;
 		extern bool		RE_METADATA;
 		extern bool		DRY_RUN;
+		extern bool		CRC32_CHECK;
 	}
 
 	int parse_args(int argc, char *argv[], const char *prog, const char *version);

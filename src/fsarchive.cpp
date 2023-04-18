@@ -22,6 +22,7 @@
 #include "utils.h"
 #include "log.h"
 #include "zip_fs.h"
+#include "crc32.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -235,18 +236,18 @@ namespace {
 		}
 	}
 
+	const zip_fs& get_from_cache(zipfscache_t& zcache, const std::string& f) {
+		const auto it_c = zcache.find(f);
+		if(zcache.end() != it_c)
+			return *it_c->second;
+		const auto rv = zcache.insert(zipfscache_t::value_type(f, std::make_unique<zip_fs>(f, true)));
+		if(!rv.second)
+			throw fsarchive::rt_error("Internal zip_fs cache corrupted, double entry for ") << f;
+		return *rv.first->second;
+	}
+
 	void r_rebuild_file(const zip_fs& c_fs, const std::string& f, buffer_t& data, zipfscache_t& zcache) {
 		using namespace fsarchive;
-
-		auto fn_get_fromcache = [&zcache](const std::string& f) -> const zip_fs& {
-			const auto it_c = zcache.find(f);
-			if(zcache.end() != it_c)
-				return *it_c->second;
-			const auto rv = zcache.insert(zipfscache_t::value_type(f, std::make_unique<zip_fs>(f, true)));
-			if(!rv.second)
-				throw fsarchive::rt_error("Internal zip_fs cache corrupted, double entry for ") << f;
-			return *rv.first->second;
-		};
 
 		stat64_t	s = {0};
 		if(!c_fs.extract_file(f, data, s))
@@ -259,7 +260,7 @@ namespace {
 		} else if(FS_TYPE_FILE_UNC == s.fs_type) {
 			// if ile is unchanged, fetch it from the correct
 			// prev entry
-			const zip_fs&	p_fs = fn_get_fromcache(combine_paths(settings::AR_DIR, s.fs_prev));
+			const zip_fs&	p_fs = get_from_cache(zcache, combine_paths(settings::AR_DIR, s.fs_prev));
 			r_rebuild_file(p_fs, f, data, zcache);
 			LOG_INFO << "File '" << f << "' has been forwarded as is (UNC) from " << s.fs_prev;
 			return;
@@ -267,7 +268,7 @@ namespace {
 			// if the file is modified, we first need to
 			// - get the original
 			buffer_t	p_data;
-			const zip_fs&	p_fs = fn_get_fromcache(combine_paths(settings::AR_DIR, s.fs_prev));
+			const zip_fs&	p_fs = get_from_cache(zcache, combine_paths(settings::AR_DIR, s.fs_prev));
 			r_rebuild_file(p_fs, f, p_data, zcache);
 			// - apply current patch
 			// s will contain the full size of the patched file
@@ -285,6 +286,21 @@ namespace {
 			return;
 		}
 		throw fsarchive::rt_error("Invalid metadata fs_type ") << s.fs_type;
+	}
+
+	bool r_crc_file(const zip_fs& c_fs, const std::string& f, zipfscache_t& zcache, uint32_t& crc) {
+		const auto& files = c_fs.get_fileset();
+		const auto it_f = files.find(f);
+		if(files.end() == it_f)
+			return false;
+		if(it_f->second.s.fs_type == FS_TYPE_FILE_NEW) {
+			crc = it_f->second.crc;
+			return true;
+		} else if(it_f->second.s.fs_type == FS_TYPE_FILE_UNC) {
+			const zip_fs&	p_fs = get_from_cache(zcache, combine_paths(settings::AR_DIR, it_f->second.s.fs_prev));
+			return r_crc_file(p_fs, f, zcache, crc);
+		}
+		return false;
 	}
 
 	regexvec_t init_regex(const fsarchive::settings::excllist_t& f) {
@@ -451,12 +467,29 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				LOG_INFO << "File '" << f.first << "' has been added as changed (MOD) -> " << z_latest_name;
 			} else {
 				// unchanged file
+				bool	add_unc = true;
+				// let's do the crc32 check
+				if(settings::CRC32_CHECK) {
+					const uint32_t	cur_crc = crc32::compute(f.first.c_str());
+					uint32_t	arc_crc = 0;
+					if(!r_crc_file(z_latest, f.first, zcache, arc_crc) || (arc_crc != cur_crc)) {
+						LOG_WARNING << "File '" << f.first << "' couldn't have its CRC32 found and/or was different (" << cur_crc << " != " << arc_crc << "). Adding as unchanged";
+						add_unc = false;
+					}
+				}
 				// optimization - if the file is unchanged in z_latest as well,
 				// then use its prev!
-				const char *prev_unc = (FS_TYPE_FILE_UNC == it_latest->second.s.fs_type) ? it_latest->second.s.fs_prev : z_latest_name.c_str();
-				if(z_next)
-					z_next->add_file_unchanged(f.first, f.second.s, prev_unc);
-				LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
+				if(add_unc) {
+					const char *prev_unc = (FS_TYPE_FILE_UNC == it_latest->second.s.fs_type) ? it_latest->second.s.fs_prev : z_latest_name.c_str();
+					if(z_next)
+						z_next->add_file_unchanged(f.first, f.second.s, prev_unc);
+					LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
+				} else {
+					// brand new file
+					if(z_next)
+						z_next->add_file_new(f.first, f.second.s, fn_comp_filter(f.first));
+					LOG_INFO << "File '" << f.first << "' has been added as new (NEW)";
+				}
 			}
 		}
 		p_delta.reset_completion(1.0);
