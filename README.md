@@ -75,7 +75,9 @@ Archive options
                         /tmp/*
                         /dev/*
                         /proc/*
-
+    --crc32-check       When creating delta archives, use CRC32 to establish if a file has changed, otherwise
+                        only size and last modified timestamp will be used; the latter (no CRC32 check) is
+                        default behaviour
 Restore options
 
 -r, --restore (arc)     Restores files from archive (arc) into current dir or ablsolute path if stored so
@@ -119,6 +121,9 @@ Due to the above binary patching, the memory requirements when running _fsarchiv
 
 #### Filesystem usage
 When running in _bsdiff/bspatch_ mode, such patches will be created in the `/tmp` filesystem (named as _/tmp/fsarc-bsdiff-XXXXXX_); do ensure enough disk space is free for the same. The files will be automatically removed upon program termination; interrupting/killing the program may leave these files on the filesystem.
+
+### CRC32 Checks
+By default this utility will use the file _size_ and _last modified time_ to determine if two files are the same - optionally one can enable _--crc32-check_ to also check the CRC32 (leveraged because is inherently part of the zip format); this of course will imply longer time for delta archival because _all_ the files which are identical between the previous archive and the current delta one will have to be fully read and check-sum with CRC32.
 
 ## Sample usages
 Archive all home directories, filtering files greater than 16 GiB, forcing the creation of a new _base_ archive, excluding the content of the _.cache_ subdirectories inside _home_:
