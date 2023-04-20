@@ -49,9 +49,14 @@ namespace fsarchive {
 		char	fs_prev[32];
 	} stat64_t;
 
+	typedef struct _stat64_ext_t {
+		stat64_t	s;
+		uint32_t	crc;
+	} stat64_ext_t;
+
 	static_assert(sizeof(stat64_t) == (48 + 32), "sizeof(stat64_t) is not 48 + 32 bytes");
 
-	typedef std::unordered_map<std::string, stat64_t>	fileset_t;
+	typedef std::unordered_map<std::string, stat64_ext_t>	fileset_ext_t;
 
 	typedef std::set<std::string>				filelist_t;
 
@@ -61,7 +66,7 @@ namespace fsarchive {
 		static const char	NO_DATA;
 		zip_t			*z_;
 		const bool		ro_;
-		fileset_t		f_map_;
+		fileset_ext_t		f_map_;
 		filelist_t		tmp_files_;
 
 		zip_fs();
@@ -85,7 +90,7 @@ namespace fsarchive {
 
 		bool extract_file(const std::string& f, buffer_t& data, stat64_t& stat) const;
 
-		const fileset_t& get_fileset(void) const;
+		const fileset_ext_t& get_fileset(void) const;
 
 		// this is not great but needed given the
 		// way libzip works

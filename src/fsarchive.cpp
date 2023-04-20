@@ -22,6 +22,7 @@
 #include "utils.h"
 #include "log.h"
 #include "zip_fs.h"
+#include "crc32.h"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -176,7 +177,7 @@ namespace {
 		}
 	}
 
-	stat64_t fsarc_stat64_from_stat64(const struct stat64& s, const char* prev = 0, const uint32_t type = FS_TYPE_FILE_NEW) {
+	stat64_ext_t fsarc_stat64_from_stat64(const struct stat64& s, const char* prev = 0, const uint32_t type = FS_TYPE_FILE_NEW) {
 		stat64_t	fs_t = {0};
 		fs_t.fs_mode = s.st_mode;
 		fs_t.fs_uid = s.st_uid;
@@ -192,7 +193,7 @@ namespace {
 		} else {
 			fs_t.fs_prev[0] = '\0';
 		}
-		return fs_t;
+		return {.s = fs_t, .crc = 0};
 	}
 
 	template<typename fn_on_elem>
@@ -235,18 +236,18 @@ namespace {
 		}
 	}
 
+	const zip_fs& get_from_cache(zipfscache_t& zcache, const std::string& f) {
+		const auto it_c = zcache.find(f);
+		if(zcache.end() != it_c)
+			return *it_c->second;
+		const auto rv = zcache.insert(zipfscache_t::value_type(f, std::make_unique<zip_fs>(f, true)));
+		if(!rv.second)
+			throw fsarchive::rt_error("Internal zip_fs cache corrupted, double entry for ") << f;
+		return *rv.first->second;
+	}
+
 	void r_rebuild_file(const zip_fs& c_fs, const std::string& f, buffer_t& data, zipfscache_t& zcache) {
 		using namespace fsarchive;
-
-		auto fn_get_fromcache = [&zcache](const std::string& f) -> const zip_fs& {
-			const auto it_c = zcache.find(f);
-			if(zcache.end() != it_c)
-				return *it_c->second;
-			const auto rv = zcache.insert(zipfscache_t::value_type(f, std::make_unique<zip_fs>(f, true)));
-			if(!rv.second)
-				throw fsarchive::rt_error("Internal zip_fs cache corrupted, double entry for ") << f;
-			return *rv.first->second;
-		};
 
 		stat64_t	s = {0};
 		if(!c_fs.extract_file(f, data, s))
@@ -259,7 +260,7 @@ namespace {
 		} else if(FS_TYPE_FILE_UNC == s.fs_type) {
 			// if ile is unchanged, fetch it from the correct
 			// prev entry
-			const zip_fs&	p_fs = fn_get_fromcache(combine_paths(settings::AR_DIR, s.fs_prev));
+			const zip_fs&	p_fs = get_from_cache(zcache, combine_paths(settings::AR_DIR, s.fs_prev));
 			r_rebuild_file(p_fs, f, data, zcache);
 			LOG_INFO << "File '" << f << "' has been forwarded as is (UNC) from " << s.fs_prev;
 			return;
@@ -267,7 +268,7 @@ namespace {
 			// if the file is modified, we first need to
 			// - get the original
 			buffer_t	p_data;
-			const zip_fs&	p_fs = fn_get_fromcache(combine_paths(settings::AR_DIR, s.fs_prev));
+			const zip_fs&	p_fs = get_from_cache(zcache, combine_paths(settings::AR_DIR, s.fs_prev));
 			r_rebuild_file(p_fs, f, p_data, zcache);
 			// - apply current patch
 			// s will contain the full size of the patched file
@@ -285,6 +286,21 @@ namespace {
 			return;
 		}
 		throw fsarchive::rt_error("Invalid metadata fs_type ") << s.fs_type;
+	}
+
+	bool r_crc_file(const zip_fs& c_fs, const std::string& f, zipfscache_t& zcache, uint32_t& crc) {
+		const auto& files = c_fs.get_fileset();
+		const auto it_f = files.find(f);
+		if(files.end() == it_f)
+			return false;
+		if(it_f->second.s.fs_type == FS_TYPE_FILE_NEW) {
+			crc = it_f->second.crc;
+			return true;
+		} else if(it_f->second.s.fs_type == FS_TYPE_FILE_UNC) {
+			const zip_fs&	p_fs = get_from_cache(zcache, combine_paths(settings::AR_DIR, it_f->second.s.fs_prev));
+			return r_crc_file(p_fs, f, zcache, crc);
+		}
+		return false;
 	}
 
 	regexvec_t init_regex(const fsarchive::settings::excllist_t& f) {
@@ -360,11 +376,11 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		auto fn_on_elem = [&z, &fn_comp_filter](const std::string& f, const struct stat64& s) -> void {
 			if(S_ISREG(s.st_mode)) {
 				if(z)
-					z->add_file_new(f, fsarc_stat64_from_stat64(s), fn_comp_filter(f));
+					z->add_file_new(f, fsarc_stat64_from_stat64(s).s, fn_comp_filter(f));
 				LOG_INFO << "File '" << f << "' has been added as new (NEW)";
 			} else if (S_ISDIR(s.st_mode)) {
 				if(z)
-					z->add_directory(f, fsarc_stat64_from_stat64(s));
+					z->add_directory(f, fsarc_stat64_from_stat64(s).s);
 				LOG_INFO << "Directory '" << f << "' has been added";
 			}
 		};
@@ -384,7 +400,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		// we need to generate a new 'delta' archive
 		pzip_fs_t	z_next(settings::DRY_RUN ? 0 : std::make_unique<zip_fs>(ar_next_path.c_str(), false));
 		// then we need to get all the files
-		fileset_t	all_files;
+		fileset_ext_t	all_files;
 		{
 			auto fn_fileadd = [&all_files](const std::string& f, const struct stat64& s) -> void {
 				if(S_ISREG(s.st_mode) || S_ISDIR(s.st_mode))
@@ -405,9 +421,9 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		for(const auto& f : all_files) {
 			p_delta.update_completion(1.0*(p_num++)/all_files.size());
 			// if f is a directory, just add it to the new archive
-			if(S_ISDIR(f.second.fs_mode)) {
+			if(S_ISDIR(f.second.s.fs_mode)) {
 				if(z_next)
-					z_next->add_directory(f.first, f.second);
+					z_next->add_directory(f.first, f.second.s);
 				LOG_INFO << "Directory '" << f.first << "' has been added";
 				continue;
 			}
@@ -416,16 +432,16 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 			if(it_latest == latest_fileset.end()) {
 				// brand new file
 				if(z_next)
-					z_next->add_file_new(f.first, f.second, fn_comp_filter(f.first));
+					z_next->add_file_new(f.first, f.second.s, fn_comp_filter(f.first));
 				LOG_INFO << "File '" << f.first << "' has been added as new (NEW)";
-			} else if((f.second.fs_mtime != it_latest->second.fs_mtime) ||
-				  (f.second.fs_size != it_latest->second.fs_size)) {
+			} else if((f.second.s.fs_mtime != it_latest->second.s.fs_mtime) ||
+				  (f.second.s.fs_size != it_latest->second.s.fs_size)) {
 				// in case we don't want any bsdiff
 				// or current file is marked to be comp excluded
 				const bool	is_comp_excl = fn_comp_filter(f.first);
 				if(!settings::AR_USE_BSDIFF || is_comp_excl) {
 					if(z_next)
-						z_next->add_file_new(f.first, f.second, is_comp_excl);
+						z_next->add_file_new(f.first, f.second.s, is_comp_excl);
 					LOG_INFO << "File '" << f.first << "' has been added as new (NEW - no bsdiff)";
 					continue;
 				}
@@ -447,16 +463,33 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
 				// and finally add it
 				if(z_next)
-					z_next->add_file_bsdiff(f.first, f.second, s_diff.str(), z_latest_name.c_str(), fn_comp_filter(f.first));
+					z_next->add_file_bsdiff(f.first, f.second.s, s_diff.str(), z_latest_name.c_str(), fn_comp_filter(f.first));
 				LOG_INFO << "File '" << f.first << "' has been added as changed (MOD) -> " << z_latest_name;
 			} else {
 				// unchanged file
+				bool	add_unc = true;
+				// let's do the crc32 check
+				if(settings::CRC32_CHECK) {
+					const uint32_t	cur_crc = crc32::compute(f.first.c_str());
+					uint32_t	arc_crc = 0;
+					if(!r_crc_file(z_latest, f.first, zcache, arc_crc) || (arc_crc != cur_crc)) {
+						LOG_WARNING << "File '" << f.first << "' couldn't have its CRC32 found and/or was different (" << cur_crc << " != " << arc_crc << "). Adding as unchanged";
+						add_unc = false;
+					}
+				}
 				// optimization - if the file is unchanged in z_latest as well,
 				// then use its prev!
-				const char *prev_unc = (FS_TYPE_FILE_UNC == it_latest->second.fs_type) ? it_latest->second.fs_prev : z_latest_name.c_str();
-				if(z_next)
-					z_next->add_file_unchanged(f.first, f.second, prev_unc);
-				LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
+				if(add_unc) {
+					const char *prev_unc = (FS_TYPE_FILE_UNC == it_latest->second.s.fs_type) ? it_latest->second.s.fs_prev : z_latest_name.c_str();
+					if(z_next)
+						z_next->add_file_unchanged(f.first, f.second.s, prev_unc);
+					LOG_INFO << "File '" << f.first << "' has been added as unchanged (UNC) -> " << prev_unc;
+				} else {
+					// brand new file
+					if(z_next)
+						z_next->add_file_new(f.first, f.second.s, fn_comp_filter(f.first));
+					LOG_INFO << "File '" << f.first << "' has been added as new (NEW)";
+				}
 			}
 		}
 		p_delta.reset_completion(1.0);
@@ -498,7 +531,7 @@ void fsarchive::restore_archive(void) {
 		p_restore->update_completion(1.0*(p_num++)/re_fs.size());
 		const std::string	out_file = fn_out_file(f.first);
 		// if the current file is a directory, add it and carry on
-		if(S_ISDIR(f.second.fs_mode)) {
+		if(S_ISDIR(f.second.s.fs_mode)) {
 			init_paths(out_file);
 			LOG_INFO << "Directory '" << out_file << "' restored";
 			continue;
@@ -520,7 +553,7 @@ void fsarchive::restore_archive(void) {
 		for(const auto& f : re_fs) {
 			p_restore->update_completion(1.0*(p_num++)/re_fs.size());
 			const std::string	out_file = fn_out_file(f.first);
-			update_metadata(out_file, f.second);
+			update_metadata(out_file, f.second.s);
 		}
 		p_restore->update_completion(1.0);
 	}
