@@ -26,6 +26,26 @@
 #include "log.h"
 
 namespace {
+	const char *builtin_excl[] = {
+		"/home/?/.cache/*",
+		"/home/?/.local/share/gvfs-metadata/?.log",
+		"/home/?/snap/firefox/common/.cache/*",
+		"/tmp/*",
+		"/dev/*",
+		"/proc/*"
+	};
+
+	const char *builtin_nocomp[] = {
+		"*.jpg",
+		"*.png",
+		"*.tar.bz2",
+		"*.tar.gz",
+		"*.tar.xz",
+		"*.tgz",
+		"*.zip",
+		"*.rar"
+	};
+
 	// settings/options management
 	void print_help(const char *prog, const char *version) {
 		using namespace fsarchive::settings;
@@ -40,7 +60,11 @@ namespace {
 				"-f, --comp-filter (f)   Excludes files from being compresses; this option follows same format as -x option\n"
 				"                        and can be repeated multiple times; files matching such expressions won't be compressed\n"
 				"                        Files that are excluded from compression are also excluded from bsdiff deltas\n"
-				"    --no-comp           Flag to create zip files without any compression - default off\n"
+				"-F, --builtin-nocomp    Flag to enable builtin no compression; currently those are:\n";
+		for(const auto& x : builtin_nocomp) {
+			std::cerr << "                        " << x << "\n";
+		}
+		std::cerr <<	"    --no-comp           Flag to create zip files without any compression - default off\n"
 				"    --force-new-arc     Flag to force the creation of a new archive (-a option) even if a previous already\n"
 				"                        exists (i.e. no delta archive would be created)\n"
 				"-b, --use-bsdiff        When creating delta archives do store file differences as bsdiff/bspatch data\n"
@@ -57,13 +81,11 @@ namespace {
 				"                        You can specify multiple exclusions (i.e. -x ex1 -x ex2 ... )\n"
 				"    --size-filter (sz)  Set a maximum file size filter of size (sz); has to be a positive value (bytes) and\n"
 				"                        can have suffixes such as k, m and g to respectively interpret as KiB, MiB and GiB\n"
-				"-X, --builtin-excl      Flag to enable builtin exclusions; currently those are:\n"
-				"                        /home/?/.cache/*\n"
-				"                        /home/?/snap/firefox/common/.cache/*\n"
-				"                        /tmp/*\n"
-				"                        /dev/*\n"
-				"                        /proc/*\n"
-				"    --crc32-check       When creating delta archives, use CRC32 to establish if a file has changed, otherwise\n"
+				"-X, --builtin-excl      Flag to enable builtin exclusions; currently those are:\n";
+		for(const auto& x : builtin_excl) {
+			std::cerr << "                        " << x << "\n";
+		}
+		std::cerr <<	"    --crc32-check       When creating delta archives, use CRC32 to establish if a file has changed, otherwise\n"
 				"                        only size and last modified timestamp will be used; the latter (no CRC32 check) is\n"
 				"                        default behaviour\n"
 				"\nRestore options\n\n"
@@ -118,6 +140,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		{"verbose",	no_argument,	   0,	'v'},
 		{"no-comp", 	no_argument,	   0,	0},
 		{"comp-filter", required_argument, 0,	'f'},
+		{"builtin-nocomp", no_argument,	   0,	'F'},
 		{"crc32-check", no_argument,	   0,	0},
 		{0, 0, 0, 0}
 	};
@@ -126,7 +149,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
         	// getopt_long stores the option index here
         	int		option_index = 0;
 
-		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:vf:Xb", long_options, &option_index)))
+		if(-1 == (c = getopt_long(argc, argv, "a:r:d:x:vf:XFb", long_options, &option_index)))
        			break;
 
 		switch (c) {
@@ -203,15 +226,8 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 		} break;
 
 		case 'X': {
-			const char *builtin_excl[] = {
-				"/home/?/.cache/*",
-				"/home/?/snap/firefox/common/.cache/*",
-				"/tmp/*",
-				"/dev/*",
-				"/proc/*"
-			};
-			for(size_t i = 0; i < sizeof(builtin_excl)/sizeof(const char**); ++i)
-				AR_EXCLUSIONS.insert(builtin_excl[i]);
+			for(const auto& x : builtin_excl)
+				AR_EXCLUSIONS.insert(x);
 		} break;
 
 		case 'v': {
@@ -220,6 +236,11 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 
 		case 'f': {
 			AR_COMP_FILTER.insert(optarg);
+		} break;
+
+		case 'F': {
+			for(const auto& x : builtin_nocomp)
+				AR_EXCLUSIONS.insert(x);
 		} break;
 
 		case 'b': {
