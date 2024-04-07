@@ -303,7 +303,7 @@ namespace {
 		return false;
 	}
 
-	regexvec_t init_regex(const fsarchive::settings::excllist_t& f) {
+	regexvec_t init_regex(const fsarchive::settings::excllist_t& f, const bool nocase = false) {
 		// used to sanitize input
 		const static std::regex	special_chars { R"([-[\]{}()*+?.,\^$|#\s])" };
 		regexvec_t	rv;
@@ -328,7 +328,8 @@ namespace {
 			}
 			cur_regex << std::regex_replace(std::string(p_cur), special_chars, R"(\$&)");
 			//
-			rv.push_back(std::regex(cur_regex.str()));
+			const auto regex_opt = (nocase) ? std::regex_constants::ECMAScript|std::regex_constants::icase : std::regex_constants::ECMAScript;
+			rv.push_back(std::regex(cur_regex.str(), regex_opt));
 		}
 
 		return rv;
@@ -343,7 +344,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		.r_excl = init_regex(settings::AR_EXCLUSIONS),
 		.sz_excl = settings::AR_SZ_FILTER,
 	};
-	const regexvec_t	ar_comp_filter = init_regex(settings::AR_COMP_FILTER);
+	const regexvec_t	ar_comp_filter = init_regex(settings::AR_COMP_FILTER, true);
 	auto 			fn_comp_filter	= [&ar_comp_filter](const std::string& f) -> int {
 		// if we don't need to compress
 		// just short circuit
