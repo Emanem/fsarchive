@@ -49,12 +49,14 @@ def compare_filedata(lhs, rhs):
     for f, md5sum in lhs['files'].items():
         if f not in rhs['files']:
             rv_files[f] = 'm-rhs'
+            continue
         if md5sum != rhs['files'][f]:
             rv_files[f] = 'd-rhs'
     # lhs -> rhs
     for f, md5sum in rhs['files'].items():
         if f not in lhs['files']:
             rv_files[f] = 'm-lhs'
+            continue
         if md5sum != lhs['files'][f]:
             rv_files[f] = 'd-lhs'
     # dirs
@@ -73,15 +75,20 @@ def assert_same_filedata(lhs, rhs):
     assert len(rvd) == 0, "Diffetence in directories"
 
 
-def test_cleanup(arc):
-    for a in arc:
-        os.remove(a)
-    shutil.rmtree(TEST_DATA_TMPDIR)
-    shutil.rmtree(TEST_DATA_DIR)
+def test_cleanup(msg = ""):
+    files = [f for f in os.listdir('.') if os.path.isfile(os.path.join('.', f))]
+    files = [f for f in files if re.match(r'^fsarc_.*\.zip$', f)]
+    for f in files:
+        os.remove(f)
+    shutil.rmtree(TEST_DATA_TMPDIR, ignore_errors=True)
+    shutil.rmtree(TEST_DATA_DIR, ignore_errors=True)
     run_process(f"git checkout HEAD {TEST_DATA_DIR}")
+    if len(msg) > 0:
+        print(msg)
 
 
 def run_test_base():
+    test_cleanup("run_test_base")
     arc = run_fsarchive(f"-a . {TEST_DATA_DIR}")
     assert len(arc) == 1, "We should have created one archive"
     # decompress in another subdirectory
@@ -92,10 +99,10 @@ def run_test_base():
     out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
     # compare the two
     assert_same_filedata(in_files, out_files)
-    test_cleanup(arc)
 
 
 def run_test_add():
+    test_cleanup("run_test_add")
     arc = run_fsarchive(f"-a . {TEST_DATA_DIR}")
     assert len(arc) == 1, "We should have created one archive"
     # add one more file
@@ -111,14 +118,15 @@ def run_test_add():
     out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
     # compare the two
     assert_same_filedata(in_files, out_files)
-    test_cleanup(arc)
 
 
 def run_test_rm():
+    test_cleanup("run_test_rm")
     arc = run_fsarchive(f"-a . {TEST_DATA_DIR}")
     assert len(arc) == 1, "We should have created one archive"
     # remove one file
-    os.remove(f"{TEST_DATA_DIR}/a.txt")
+    file_to_rm = f"{TEST_DATA_DIR}/a.txt"
+    os.remove(file_to_rm)
     # run another archive, this time expecting to have 2 archives with delta
     arc = run_fsarchive(f"-a . {TEST_DATA_DIR}")
     assert len(arc) == 2, "We should have created two archives"
@@ -130,7 +138,44 @@ def run_test_rm():
     out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
     # compare the two
     assert_same_filedata(in_files, out_files)
-    test_cleanup(arc)
+    # now remove the out test and restore the previous archive
+    shutil.rmtree(TEST_DATA_TMPDIR)
+    # decompress in another subdirectory
+    run_fsarchive(f"-d {TEST_DATA_TMPDIR} -r {arc[-2]}")
+    out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
+    rvf, rvd = compare_filedata(in_files, out_files)
+    assert rvf[file_to_rm] == 'm-lhs', "Previous archive doesn't contain all original files"
+
+
+def run_test_exclude0():
+    test_cleanup("run_test_exclude0")
+    arc = run_fsarchive(f"-a . -x \"./?/a.txt\" {TEST_DATA_DIR}")
+    assert len(arc) == 1, "We should have created one archive"
+    # decompress in another subdirectory
+    run_fsarchive(f"-d {TEST_DATA_TMPDIR} -r {arc[-1]}")
+    # get all the input files
+    in_files = get_filedata(TEST_DATA_DIR)
+    # get the test output
+    out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
+    # compare the two
+    rvf, rvd = compare_filedata(in_files, out_files)
+    assert rvf[f"./test_data/a.txt"] == 'm-rhs', "File is supposed to be excluded"
+
+
+def run_test_exclude1():
+    test_cleanup("run_test_exclude1")
+    arc = run_fsarchive(f"-a . -x \"*something.txt\" {TEST_DATA_DIR}")
+    assert len(arc) == 1, "We should have created one archive"
+    # decompress in another subdirectory
+    run_fsarchive(f"-d {TEST_DATA_TMPDIR} -r {arc[-1]}")
+    # get all the input files
+    in_files = get_filedata(TEST_DATA_DIR)
+    # get the test output
+    out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
+    # compare the two
+    rvf, rvd = compare_filedata(in_files, out_files)
+    assert rvf['./test_data/abc/something.txt'] == 'm-rhs', "File is supposed to be excluded"
+    assert rvf['./test_data/abc/def/something.txt'] == 'm-rhs', "File is supposed to be excluded"
 
 
 def main():
@@ -142,6 +187,11 @@ def main():
     run_test_add()
     # removal of a file
     run_test_rm()
+    # file exclusion
+    run_test_exclude0()
+    run_test_exclude1()
+    # file test cleanup
+    test_cleanup()
 
 
 if __name__ == "__main__":
