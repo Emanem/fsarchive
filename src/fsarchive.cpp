@@ -349,10 +349,6 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 		// just short circuit
 		if(!settings::AR_COMPRESS)
 			return -1;
-		// if we have specified a blanket
-		// compression level, just use it
-		if(settings::AR_COMP_LEVEL)
-			return settings::AR_COMP_LEVEL;
 		// otherwise try to filter - exclusions
 		for(const auto& r : ar_comp_filter) {
 			std::smatch	s;
@@ -361,6 +357,10 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				return -1;
 			}
 		}
+		// if we have specified a blanket
+                // compression level, just use it
+                if(settings::AR_COMP_LEVEL)
+                        return settings::AR_COMP_LEVEL;
 		// default compression
 		return 0;
 	};
@@ -438,8 +438,8 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 				  (f.second.s.fs_size != it_latest->second.s.fs_size)) {
 				// in case we don't want any bsdiff
 				// or current file is marked to be comp excluded
-				const bool	is_comp_excl = fn_comp_filter(f.first);
-				if(!settings::AR_USE_BSDIFF || is_comp_excl) {
+				const int	is_comp_excl = fn_comp_filter(f.first);
+				if(!settings::AR_USE_BSDIFF) {
 					if(z_next)
 						z_next->add_file_new(f.first, f.second.s, is_comp_excl);
 					LOG_INFO << "File '" << f.first << "' has been added as new (NEW - no bsdiff)";
@@ -463,7 +463,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 					throw fsarchive::rt_error("Couldn't diff file ") << f.first << " from archive";
 				// and finally add it
 				if(z_next)
-					z_next->add_file_bsdiff(f.first, f.second.s, s_diff.str(), z_latest_name.c_str(), fn_comp_filter(f.first));
+					z_next->add_file_bsdiff(f.first, f.second.s, s_diff.str(), z_latest_name.c_str(), is_comp_excl);
 				LOG_INFO << "File '" << f.first << "' has been added as changed (MOD) -> " << z_latest_name;
 			} else {
 				// unchanged file
@@ -473,7 +473,7 @@ void fsarchive::init_update_archive(char *in_dirs[], const int n) {
 					const uint32_t	cur_crc = crc32::compute(f.first.c_str());
 					uint32_t	arc_crc = 0;
 					if(!r_crc_file(z_latest, f.first, zcache, arc_crc) || (arc_crc != cur_crc)) {
-						LOG_WARNING << "File '" << f.first << "' couldn't have its CRC32 found and/or was different (" << cur_crc << " != " << arc_crc << "). Adding as unchanged";
+						LOG_WARNING << "File '" << f.first << "' couldn't have its CRC32 found and/or was different (" << cur_crc << " != " << arc_crc << "). Adding as changed";
 						add_unc = false;
 					}
 				}

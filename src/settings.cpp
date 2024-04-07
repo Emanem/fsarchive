@@ -240,7 +240,7 @@ int fsarchive::parse_args(int argc, char *argv[], const char *prog, const char *
 
 		case 'F': {
 			for(const auto& x : builtin_nocomp)
-				AR_EXCLUSIONS.insert(x);
+				AR_COMP_FILTER.insert(x);
 		} break;
 
 		case 'b': {
