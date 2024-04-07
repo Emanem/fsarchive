@@ -178,6 +178,23 @@ def run_test_exclude1():
     assert rvf['./test_data/abc/def/something.txt'] == 'm-rhs', "File is supposed to be excluded"
 
 
+def run_test_nocomp():
+    test_cleanup("run_test_nocomp")
+    arc = run_fsarchive(f"-a . {TEST_DATA_DIR}")
+    assert len(arc) == 1, "We should have created one archive"
+    arc = run_fsarchive(f"--force-new-arc -F -a . {TEST_DATA_DIR}")
+    assert len(arc) == 2, "We should have created another"
+    assert os.stat(arc[-1]).st_size > os.stat(arc[-2]).st_size, "Second archive not larger than first"
+    # decompress in another subdirectory
+    run_fsarchive(f"-d {TEST_DATA_TMPDIR} -r {arc[-1]}")
+    # get all the input files
+    in_files = get_filedata(TEST_DATA_DIR)
+    # get the test output
+    out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
+    # compare the two
+    assert_same_filedata(in_files, out_files)
+
+
 def main():
     # first build
     run_process("make clean && make release -j $(nproc)")
@@ -190,6 +207,8 @@ def main():
     # file exclusion
     run_test_exclude0()
     run_test_exclude1()
+    # archive compressed
+    run_test_nocomp()
     # file test cleanup
     test_cleanup()
 
