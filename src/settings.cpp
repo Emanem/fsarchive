@@ -29,6 +29,7 @@ namespace {
 	const char *builtin_excl[] = {
 		"/home/?/.cache/*",
 		"/home/?/.local/share/gvfs-metadata/?.log",
+		"/home/?/.local/share/nautilus/tags/*",
 		"/home/?/snap/firefox/common/.cache/*",
 		"/tmp/*",
 		"/dev/*",
