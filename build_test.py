@@ -43,14 +43,34 @@ def get_filedata(path, base_path = '.'):
 
 
 def compare_filedata(lhs, rhs):
-    if sorted(lhs['files'].keys()) != sorted(rhs['files'].keys()):
-        return False, "Different files"
-    if sorted(lhs['dirs'].keys()) != sorted(rhs['dirs'].keys()):
-        return False, "Different directories"
+    rv_files = {}
+    rv_dirs = {}
+    # rhs -> lhs
     for f, md5sum in lhs['files'].items():
+        if f not in rhs['files']:
+            rv_files[f] = 'm-rhs'
         if md5sum != rhs['files'][f]:
-            return False, f"Different file content '{f}'"
-    return True, ""
+            rv_files[f] = 'd-rhs'
+    # lhs -> rhs
+    for f, md5sum in rhs['files'].items():
+        if f not in lhs['files']:
+            rv_files[f] = 'm-lhs'
+        if md5sum != lhs['files'][f]:
+            rv_files[f] = 'd-lhs'
+    # dirs
+    for d in lhs['dirs'].keys():
+        if d not in rhs['dirs']:
+            rv_dirs[d] = 'm-rhs'
+    for d in rhs['dirs'].keys():
+        if d not in lhs['dirs']:
+            rv_dirs[d] = 'm-lhs'
+    return rv_files, rv_dirs
+
+
+def assert_same_filedata(lhs, rhs):
+    rvf, rvd = compare_filedata(lhs, rhs)
+    assert len(rvf) == 0, "Difference in files"
+    assert len(rvd) == 0, "Diffetence in directories"
 
 
 def test_cleanup(arc):
@@ -71,8 +91,7 @@ def run_test_base():
     # get the test output
     out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
     # compare the two
-    rv, msg = compare_filedata(in_files, out_files)
-    assert rv, f"Expecting to have same files, instead: {msg}"
+    assert_same_filedata(in_files, out_files)
     test_cleanup(arc)
 
 
@@ -91,8 +110,7 @@ def run_test_add():
     # get the test output
     out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
     # compare the two
-    rv, msg = compare_filedata(in_files, out_files)
-    assert rv, f"Expecting to have same files, instead: {msg}"
+    assert_same_filedata(in_files, out_files)
     test_cleanup(arc)
 
 
@@ -111,8 +129,7 @@ def run_test_rm():
     # get the test output
     out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
     # compare the two
-    rv, msg = compare_filedata(in_files, out_files)
-    assert rv, f"Expecting to have same files, instead: {msg}"
+    assert_same_filedata(in_files, out_files)
     test_cleanup(arc)
 
 
