@@ -99,6 +99,13 @@ def run_test_base():
     out_files = get_filedata(TEST_DATA_DIR, TEST_DATA_TMPDIR)
     # compare the two
     assert_same_filedata(in_files, out_files)
+    # then check metadata
+    for f in in_files['files']:
+        in_st = os.stat(f)
+        out_st = os.stat(f"{TEST_DATA_TMPDIR}/{f}")
+        assert in_st.st_uid == out_st.st_uid, f"Different st_uid for file {f}"
+        assert in_st.st_gid == out_st.st_gid, f"Different st_gid for file {f}"
+        assert int(in_st.st_mtime) == int(out_st.st_mtime), f"Different st_mtime for file {f}"
 
 
 def run_test_add():
